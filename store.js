@@ -28,31 +28,80 @@ function ensureDirs() {
   }
 }
 
+/** Le um arquivo de banco; devolve null se nao existir ou estiver invalido. */
+function lerBanco(arquivo) {
+  try {
+    if (!fs.existsSync(arquivo)) return null;
+    const raw = JSON.parse(fs.readFileSync(arquivo, 'utf8'));
+    return {
+      videos: Array.isArray(raw.videos) ? raw.videos : [],
+      counters: Object.assign({ apiCallsSaved: 0, totalGerados: 0 }, raw.counters),
+    };
+  } catch (err) {
+    console.error(`[store] ${path.basename(arquivo)} invalido: ${err.message}`);
+    return null;
+  }
+}
+
 function load() {
   if (loaded) return state;
   ensureDirs();
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-      state = {
-        videos: Array.isArray(raw.videos) ? raw.videos : [],
-        counters: Object.assign({ apiCallsSaved: 0, totalGerados: 0 }, raw.counters),
-      };
+
+  // Ordem de recuperacao: arquivo principal -> backup -> banco novo.
+  // O backup existe porque a troca e feita em dois renames (ver escreverAtomico):
+  // se o processo morrer entre eles, o principal some mas o .bak esta inteiro.
+  const temPrincipal = fs.existsSync(DB_FILE);
+  const temBackup = fs.existsSync(`${DB_FILE}.bak`);
+  const principal = temPrincipal ? lerBanco(DB_FILE) : null;
+
+  if (principal) {
+    state = principal;
+  } else {
+    const backup = temBackup ? lerBanco(`${DB_FILE}.bak`) : null;
+    if (backup) {
+      console.warn(`[store] principal ilegivel — recuperado do backup: ${backup.videos.length} video(s) preservado(s)`);
+      state = backup;
+    } else {
+      // Silencio na primeira execucao: nao ter banco ainda nao e problema.
+      if (temPrincipal || temBackup) console.error('[store] nenhum banco utilizavel, iniciando novo');
+      state = { videos: [], counters: { apiCallsSaved: 0, totalGerados: 0 } };
     }
-  } catch (err) {
-    // Banco corrompido nao deve derrubar o servidor: avisa e comeca limpo.
-    console.error('[store] videos.json invalido, iniciando banco novo:', err.message);
-    state = { videos: [], counters: { apiCallsSaved: 0, totalGerados: 0 } };
   }
+
   loaded = true;
   return state;
+}
+
+/**
+ * Grava sem deixar arquivo pela metade.
+ *
+ * `writeFileSync` direto no arquivo final nao e atomico: matar o processo no
+ * meio (Ctrl+C, queda de energia, OOM) deixa um JSON truncado — e um JSON
+ * truncado significava perder TODO o historico. Aqui a troca e por rename,
+ * que o sistema de arquivos faz de forma atomica: quem le sempre enxerga a
+ * versao velha inteira ou a nova inteira, nunca um meio-termo.
+ */
+function escreverAtomico(arquivo, conteudo) {
+  const tmp = `${arquivo}.tmp`;
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    fs.writeFileSync(fd, conteudo);
+    fs.fsyncSync(fd); // garante o conteudo no disco ANTES do rename
+  } finally {
+    fs.closeSync(fd);
+  }
+  // Guarda a versao anterior: rename e so metadado, nao copia bytes.
+  if (fs.existsSync(arquivo)) {
+    try { fs.renameSync(arquivo, `${arquivo}.bak`); } catch { /* segue */ }
+  }
+  fs.renameSync(tmp, arquivo);
 }
 
 function flush(immediate = false) {
   if (immediate) {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     ensureDirs();
-    fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2));
+    escreverAtomico(DB_FILE, JSON.stringify(state, null, 2));
     return;
   }
   if (flushTimer) return;
@@ -60,7 +109,7 @@ function flush(immediate = false) {
     flushTimer = null;
     try {
       ensureDirs();
-      fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2));
+      escreverAtomico(DB_FILE, JSON.stringify(state, null, 2));
     } catch (err) {
       console.error('[store] falha ao salvar:', err.message);
     }
@@ -196,6 +245,7 @@ function stats() {
 
 module.exports = {
   ensureDirs,
+  escreverAtomico,
   load,
   flush,
   createVideo,

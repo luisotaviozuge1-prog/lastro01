@@ -405,6 +405,53 @@ async function main() {
   config.RENDER.ATIVO = false;
   render.limparCache();
 
+  // ---------------------------- 11) DURABILIDADE do banco (escrita atomica)
+  console.log('\n11) DURABILIDADE — o banco nao pode sumir se o processo morrer');
+  const dirDur = path.join(config.PATHS.DATA, 'durabilidade');
+  fs.rmSync(dirDur, { recursive: true, force: true });
+  fs.mkdirSync(dirDur, { recursive: true });
+  const arqDur = path.join(dirDur, 'videos.json');
+
+  // A gravacao nunca pode deixar arquivo pela metade: durante a escrita, o
+  // arquivo final ou nao mudou ainda ou ja esta completo.
+  store.escreverAtomico(arqDur, JSON.stringify({ videos: [{ id: 'a' }], counters: {} }));
+  ok(JSON.parse(fs.readFileSync(arqDur, 'utf8')).videos.length === 1, 'escrita atomica grava o arquivo');
+  store.escreverAtomico(arqDur, JSON.stringify({ videos: [{ id: 'a' }, { id: 'b' }], counters: {} }));
+  ok(fs.existsSync(`${arqDur}.bak`), 'a versao anterior vira backup antes da troca');
+  ok(JSON.parse(fs.readFileSync(`${arqDur}.bak`, 'utf8')).videos.length === 1, 'backup guarda a versao anterior inteira');
+  ok(!fs.existsSync(`${arqDur}.tmp`), 'nao sobra arquivo temporario');
+
+  // Processo morto no meio da escrita: um .tmp orfao nao pode atrapalhar.
+  fs.writeFileSync(`${arqDur}.tmp`, '{ truncad');
+  store.escreverAtomico(arqDur, JSON.stringify({ videos: [{ id: 'c' }], counters: {} }));
+  ok(JSON.parse(fs.readFileSync(arqDur, 'utf8')).videos[0].id === 'c', 'tmp orfao de uma morte anterior nao corrompe a proxima escrita');
+
+  // Recuperacao: principal truncado + backup bom.
+  const subproc = require('child_process');
+  const dirRec = path.join(config.PATHS.DATA, 'recuperacao');
+  fs.rmSync(dirRec, { recursive: true, force: true });
+  fs.mkdirSync(dirRec, { recursive: true });
+  const escreverStore = (codigo) => subproc.execFileSync(process.execPath,
+    ['-e', codigo], { env: { ...process.env, DATA_DIR: dirRec }, encoding: 'utf8' });
+
+  escreverStore(`const s=require('${path.join(__dirname, 'store.js')}');
+    for(let i=0;i<4;i++) s.createVideo({id:'d'+i,nicho:'gta6'});
+    s.flush(true); s.createVideo({id:'d4',nicho:'gta6'}); s.flush(true);`);
+  fs.writeFileSync(path.join(dirRec, 'videos.json'), '{"videos":[{"id":"tru');
+
+  const recuperado = escreverStore(`const s=require('${path.join(__dirname, 'store.js')}');
+    s.load(); process.stdout.write(String(s.listVideos({limit:99}).length));`);
+  ok(Number(recuperado.trim().split('\n').pop()) === 4,
+    `banco truncado se recupera do backup (${recuperado.trim().split('\n').pop()} videos preservados)`);
+
+  // Banco novo nao pode gritar erro (primeira execucao e normal).
+  const dirNovo = path.join(config.PATHS.DATA, 'primeira-vez');
+  fs.rmSync(dirNovo, { recursive: true, force: true });
+  const saidaNova = subproc.execFileSync(process.execPath,
+    ['-e', `const s=require('${path.join(__dirname, 'store.js')}');s.load();process.stdout.write('ok');`],
+    { env: { ...process.env, DATA_DIR: dirNovo }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  ok(saidaNova.trim() === 'ok', 'primeira execucao carrega em silencio (sem erro falso)');
+
   // --------------------------------------------------------------- fim
   server.close();
   await queue.close();
