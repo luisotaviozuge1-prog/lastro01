@@ -75,6 +75,12 @@ Nenhuma API externa é chamada. Cada agente tem um comentário **`PLUG AQUI`** m
 - **A limpeza de temp no boot só apaga pastas paradas há mais de 5 min**, para não atropelar outra instância usando o mesmo `DATA_DIR`.
 - **`quantidade` acima de 100 é cortada em 100** por chamada de `/api/generate-multiple`; a resposta avisa.
 
+## Sessões na nuvem (celular / claude.ai/code)
+
+`.claude/hooks/session-start.sh` roda `npm install` no começo de cada sessão remota, para `npm test` e `npm start` funcionarem num container recém-clonado. Ele sai sem fazer nada quando `CLAUDE_CODE_REMOTE` não é `true`, então no CLI local o `node_modules` continua sendo seu. O hook é síncrono: a sessão só começa depois que ele termina.
+
+O container é descartável e não tem endereço público — `localhost:3000` não abre do celular. Numa sessão remota, o ciclo é: mexer no código → `npm test` → republicar `demo.html` como artifact para ver a interface. Quem precisa ver o servidor de verdade é o CLI na sua máquina.
+
 ## Git
 
 Desenvolvimento na branch `claude/viral-video-orchestration-system-smtarv`. `data/` e `node_modules/` são gitignored.
