@@ -186,6 +186,24 @@ app.get('/api/download/:id', (req, res) => {
   res.download(video.arquivo);
 });
 
+/**
+ * GET /api/watch/:id — toca o vídeo no navegador (inline, com suporte a seek).
+ * Diferente de /api/download, que força o salvamento do arquivo.
+ */
+app.get('/api/watch/:id', (req, res) => {
+  const video = store.getVideo(req.params.id);
+  if (!video) return falhar(res, 404, `video nao encontrado: ${req.params.id}`);
+  if (!video.arquivo || !fs.existsSync(video.arquivo)) {
+    return falhar(res, 404, 'arquivo do video ainda nao existe');
+  }
+  if (video.render !== 'real') {
+    return falhar(res, 409, 'este video é um placeholder (sem ffmpeg na maquina) — nao ha o que tocar');
+  }
+  // sendFile já trata Range/206, que é o que o <video> usa para avançar.
+  res.type(path.extname(video.arquivo) === '.webm' ? 'video/webm' : 'video/mp4');
+  res.sendFile(video.arquivo);
+});
+
 /** GET /api/download/:id/manifest — manifesto JSON (timeline, script, etc). */
 app.get('/api/download/:id/manifest', (req, res) => {
   const video = store.getVideo(req.params.id);
@@ -194,12 +212,12 @@ app.get('/api/download/:id/manifest', (req, res) => {
   res.download(arquivo);
 });
 
-/** GET /api/thumb/:id — thumbnail SVG para a lista. */
+/** GET /api/thumb/:id — thumbnail da primeira cena (png no modo real). */
 app.get('/api/thumb/:id', (req, res) => {
   const video = store.getVideo(req.params.id);
   const arquivo = video && video.arquivos && video.arquivos.thumbnail;
   if (!arquivo || !fs.existsSync(arquivo)) return res.status(404).end();
-  res.type('image/svg+xml').sendFile(arquivo);
+  res.type(arquivo.endsWith('.png') ? 'image/png' : 'image/svg+xml').sendFile(arquivo);
 });
 
 /** GET /api/nichos */
@@ -270,6 +288,8 @@ function resumoVideo(v) {
     lote: v.lote,
     origem: v.origem || 'manual',
     temArquivo: Boolean(v.arquivo),
+    render: v.render || null,
+    assistivel: v.render === 'real' && Boolean(v.arquivo),
     criadoEm: v.criadoEm,
   };
 }
@@ -282,6 +302,11 @@ async function start() {
 
   const driver = await queue.init();
   autopilot.start(queue);
+
+  const renderReal = await require('./render').disponivel();
+  console.log(renderReal
+    ? '🎞️ render: ffmpeg encontrado — os videos saem em MP4 1080x1920 de verdade'
+    : '🎞️ render: ffmpeg NAO encontrado — os videos saem como placeholder (instale o ffmpeg para gerar mp4)');
 
   const server = app.listen(config.PORT, config.HOST, () => {
     console.log(`🌐 dashboard: http://localhost:${config.PORT}`);

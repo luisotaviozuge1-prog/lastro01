@@ -9,14 +9,14 @@ Idioma: o código, os comentários, os logs e a documentação deste repositóri
 ```bash
 npm install            # sem compilador nativo, sem build step
 npm start              # servidor + dashboard em http://localhost:3000
-npm test               # 60 verificações de ponta a ponta (~5s), sem Redis e sem API externa
+npm test               # 72 verificações de ponta a ponta (~18s), sem Redis e sem API externa
 ```
 
 Não há linter nem build configurado. `npm test` é a única porta de qualidade — rode antes de qualquer commit.
 
 ### Rodando parte do teste
 
-`test.js` é um script sequencial sem framework, numerado em 9 seções (pipeline, paralelo, limpeza, lote, anti-repetição, retry, API+10 vídeos, postar, piloto). Não existe filtro por nome: para isolar uma seção, comente as outras em `main()` ou copie o trecho para um script próprio. Ele usa `DATA_DIR=data/test` e apaga essa pasta no início, então nunca encosta no banco de desenvolvimento.
+`test.js` é um script sequencial sem framework, numerado em 10 seções (pipeline, paralelo, limpeza, lote, anti-repetição, retry, API+10 vídeos, postar, piloto, render real). O grosso roda com `RENDER_REAL=false` — só a seção 10 liga o ffmpeg e renderiza um mp4 de verdade, e ela se pula sozinha se não houver ffmpeg na máquina. Não existe filtro por nome: para isolar uma seção, comente as outras em `main()` ou copie o trecho para um script próprio. Ele usa `DATA_DIR=data/test` e apaga essa pasta no início, então nunca encosta no banco de desenvolvimento.
 
 ### Variáveis úteis no desenvolvimento
 
@@ -48,6 +48,7 @@ Quem manda em quê:
 - **`queue.js`** — a fila. Dois drivers, **uma API**: BullMQ+Redis se `REDIS_URL` responder, senão `MemoryQueue` (classe no mesmo arquivo). `runJob()` é o processor comum aos dois; qualquer mudança de comportamento da fila precisa valer para os dois drivers.
 - **`store.js`** — persistência JSON (`data/videos.json`), janela de anti-repetição e estatísticas. API sincrona, flush debounced.
 - **`autopilot.js`** — o piloto automático: timer de inatividade, travas e middleware do Express.
+- **`render.js`** — toda a conversa com o ffmpeg: detecção, PNG da cena, montagem do mp4 e `ffprobe`. Nenhum outro módulo chama o ffmpeg.
 - **`server.js`** — rotas + `start()`, que devolve `{ app, server, driver }` (o teste usa isso para subir o servidor em processo).
 
 ### Três invariantes que não são óbvias
@@ -58,7 +59,13 @@ Quem manda em quê:
 
 3. **No piloto automático, `GET` não conta como interação — só métodos de ação e downloads** (`autopilot.middleware`). O dashboard faz polling a cada 1,5s; se o polling contasse, o piloto nunca assumiria com a aba aberta.
 
-### Modo simulação
+### Modo real vs. simulação
+
+`orchestrator.processVideo` chama `render.disponivel()` uma vez (com cache no processo) e põe `ctx.real` no contexto. Os agentes de Áudio, Imagens e Edição têm os dois caminhos: com `ctx.real`, geram PNG/m4a/mp4 de verdade via `render.js`; sem ele, caem no placeholder. **Qualquer mudança nesses três agentes precisa valer para os dois caminhos.**
+
+O que o manifesto diz sobre o render vem do `ffprobe` lendo o arquivo gerado (`render.inspecionar`), nunca do que foi pedido — se a duração real divergir do roteiro, o manifesto mostra a real.
+
+A narração sai silenciosa enquanto `config.RENDER.TTS_CMD` não estiver definido; o `{texto}`/`{saida}` do comando são substituídos em `render.faixaAudio`.
 
 Nenhuma API externa é chamada. Cada agente tem um comentário **`PLUG AQUI`** marcando onde entra a integração real (TTS, geração de imagem, LLM, `ffmpeg`, YouTube Data API). As estruturas de dados já são as finais: trocar a simulação pela API real não deve mexer no pipeline, na fila nem no dashboard. Em `data/output/` os agentes escrevem arquivos de verdade — vídeo placeholder, manifesto JSON com a timeline e thumbnail SVG 1080x1920.
 

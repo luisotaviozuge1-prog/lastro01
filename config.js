@@ -105,6 +105,30 @@ const config = {
     LOTE_TTL_MS: num(process.env.LOTE_TTL_MS, 5 * 60 * 1000),
   },
 
+  // ---------------------------------------------- renderizacao real (ffmpeg)
+  // Se o ffmpeg existir na maquina, o Agent Edicao gera um .mp4 DE VERDADE.
+  // Se nao existir, cai sozinho no placeholder e nada quebra.
+  RENDER: {
+    ATIVO: bool(process.env.RENDER_REAL, true),
+    FFMPEG: process.env.FFMPEG_BIN || 'ffmpeg',
+    FFPROBE: process.env.FFPROBE_BIN || 'ffprobe',
+    CRF: num(process.env.RENDER_CRF, 23),       // qualidade (menor = melhor)
+    PRESET: process.env.RENDER_PRESET || 'veryfast',
+    TIMEOUT_MS: num(process.env.RENDER_TIMEOUT_MS, 120000),
+    // Fonte da legenda queimada no quadro
+    FONTE: process.env.RENDER_FONTE || null,
+    FONTES_PADRAO: [
+      '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+      '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+      '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf',
+      '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+      'C:/Windows/Fonts/arialbd.ttf',
+    ],
+    // Narracao real: comando de TTS com {texto} (arquivo de entrada) e
+    // {saida} (wav gerado). Ex.: "espeak-ng -v pt-br -w {saida} -f {texto}"
+    TTS_CMD: process.env.TTS_CMD || null,
+  },
+
   // ----------------------------------------------------------------- simulacao
   // Enquanto nao existem APIs externas plugadas, os agentes simulam dados
   // realistas (latencia, arquivos em disco, metadados).

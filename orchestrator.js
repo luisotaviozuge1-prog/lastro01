@@ -26,6 +26,7 @@ const crypto = require('crypto');
 const config = require('./config');
 const store = require('./store');
 const agents = require('./agents');
+const render = require('./render');
 
 /** Pesos de progresso por etapa — somam 100%. */
 const PESOS = config.MELHORIAS.PARALELO
@@ -89,7 +90,10 @@ async function processVideo(job, reportProgress = () => {}) {
   store.ensureDirs();
   await fsp.mkdir(tempDir, { recursive: true });
 
-  const ctx = { videoId, nicho, tempDir, outputDir: config.PATHS.OUTPUT };
+  // Modo real (mp4 de verdade) sai da deteccao do ffmpeg — resultado em cache,
+  // entao isso custa uma vez por processo, nao por video.
+  const real = await render.disponivel();
+  const ctx = { videoId, nicho, tempDir, outputDir: config.PATHS.OUTPUT, real };
   let progresso = 0;
 
   const prefixo = `[${videoId}]`;
@@ -104,7 +108,8 @@ async function processVideo(job, reportProgress = () => {}) {
   };
 
   try {
-    store.updateVideo(videoId, { status: 'processing', etapa: 'pesquisa', progresso: 0 });
+    store.updateVideo(videoId, { status: 'processing', etapa: 'pesquisa', progresso: 0, render: real ? 'real' : 'simulado' });
+    if (!real) console.log(`${prefixo} ⚠️ ffmpeg indisponivel: gerando placeholder em vez de mp4`);
 
     // ------------------------------------------------- 1) 🔍 PESQUISA
     Object.assign(ctx, await agents.agentPesquisa(ctx, log('pesquisa')));
@@ -158,6 +163,8 @@ async function processVideo(job, reportProgress = () => {}) {
       resolucao: ctx.video.resolucao,
       tempoGeracao,
       arquivo: ctx.video.arquivo,
+      render: ctx.video.real ? 'real' : 'simulado',
+      probe: ctx.video.probe || null,
       arquivos: {
         video: ctx.video.arquivo,
         manifesto: ctx.video.manifesto,

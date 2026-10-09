@@ -29,6 +29,9 @@ process.env.AUTO_PILOT = process.env.AUTO_PILOT || 'false';
 process.env.AUTO_PILOT_IDLE_MS = process.env.AUTO_PILOT_IDLE_MS || '500';
 process.env.AUTO_PILOT_CHECK_MS = process.env.AUTO_PILOT_CHECK_MS || '100000';
 process.env.AUTO_PILOT_LOTE = process.env.AUTO_PILOT_LOTE || '2';
+// Render real desligado no grosso do teste (11 videos x ffmpeg seria lento);
+// a secao 10 liga de propósito e renderiza UM mp4 de verdade.
+process.env.RENDER_REAL = process.env.RENDER_REAL || 'false';
 
 const fs = require('fs');
 const path = require('path');
@@ -40,6 +43,7 @@ const agents = require('./agents');
 const orchestrator = require('./orchestrator');
 const queue = require('./queue');
 const autopilot = require('./autopilot');
+const render = require('./render');
 
 let passou = 0;
 let falhou = 0;
@@ -348,6 +352,58 @@ async function main() {
     const d = await req('GET', '/api/dashboard');
     return d.body.stats.naFila === 0 && d.body.stats.processando === 0;
   }, 90000, 'fila do piloto esvaziar');
+
+  // ------------------------------ 10) RENDER REAL (mp4 via ffmpeg)
+  console.log('\n10) RENDER REAL — mp4 de verdade quando o ffmpeg existe');
+  ok((await render.disponivel()) === false, 'RENDER_REAL=false desliga o render real');
+
+  config.RENDER.ATIVO = true;
+  render.limparCache();
+  const temFfmpeg = await render.disponivel();
+
+  if (!temFfmpeg) {
+    console.log('   ⏭️ ffmpeg nao encontrado nesta maquina — secao pulada (o pipeline cai no placeholder, que ja foi testado na secao 1)');
+  } else {
+    ok(Boolean(await render.fonte()), `fonte para a legenda encontrada: ${await render.fonte()}`);
+
+    const idReal = orchestrator.novoVideoId();
+    store.createVideo({ id: idReal, nicho: 'easter-eggs' });
+    const t0r = Date.now();
+    const real = await orchestrator.processVideo({ videoId: idReal, nicho: 'easter-eggs' }, () => {});
+
+    ok(real.render === 'real', 'video marcado como render real');
+    ok(fs.existsSync(real.arquivo) && real.arquivo.endsWith('.mp4'), 'arquivo .mp4 existe em disco');
+
+    const p = real.probe;
+    ok(p.largura === 1080 && p.altura === 1920, `mp4 em 1080x1920 (${p.largura}x${p.altura})`);
+    ok(p.codecVideo === 'h264', `video em H.264 (${p.codecVideo})`);
+    ok(p.temAudio && p.codecAudio === 'aac', `faixa de audio AAC presente (${p.codecAudio})`);
+    ok(p.duracao >= config.VIDEO.MIN_DURATION && p.duracao <= config.VIDEO.MAX_DURATION + 2,
+      `duracao real do arquivo dentro de 20-30s (${p.duracao}s)`);
+    ok(p.bytes > 200 * 1024, `arquivo com tamanho de video real (${(p.bytes / 1024 / 1024).toFixed(2)}MB)`);
+
+    // o manifesto nao pode mentir sobre o que saiu
+    const manReal = JSON.parse(fs.readFileSync(real.arquivos.manifesto, 'utf8'));
+    ok(manReal.render.real === true && manReal.render.duracao === p.duracao,
+      'manifesto registra o render real conferido pelo ffprobe');
+    ok(real.arquivos.thumbnail.endsWith('.png') && fs.existsSync(real.arquivos.thumbnail),
+      'thumbnail em png real');
+
+    // a rota de assistir tem que servir o arquivo inline
+    const watch = await new Promise((resolve) => {
+      http.get({ host: '127.0.0.1', port: config.PORT, path: `/api/watch/${idReal}` }, (res) => {
+        res.resume();
+        resolve({ status: res.statusCode, tipo: res.headers['content-type'] });
+      }).on('error', () => resolve({ status: 0 }));
+    });
+    ok(watch.status === 200 && String(watch.tipo).includes('video/mp4'),
+      `GET /api/watch/:id serve video/mp4 (${watch.status} ${watch.tipo})`);
+
+    console.log(`   ⏱️ render real levou ${((Date.now() - t0r) / 1000).toFixed(1)}s`);
+  }
+
+  config.RENDER.ATIVO = false;
+  render.limparCache();
 
   // --------------------------------------------------------------- fim
   server.close();

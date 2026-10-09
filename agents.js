@@ -30,6 +30,7 @@ const path = require('path');
 const crypto = require('crypto');
 const config = require('./config');
 const store = require('./store');
+const render = require('./render');
 
 // ===========================================================================
 // Utilitarios
@@ -344,14 +345,42 @@ async function agentRoteiro(ctx, log) {
 async function agentAudio(ctx, log) {
   log('🎙️ Agent Audio: gerando narracao...');
   talvezFalhar('audio');
-  await trabalhar(900, 1800);
 
-  // PLUG AQUI: ElevenLabs / Azure TTS / Google TTS -> salvar o mp3 real.
   const nicho = config.NICHOS[ctx.nicho];
-  const arquivo = path.join(ctx.tempDir, 'narracao.mp3');
 
-  // Em simulacao escrevemos um arquivo real (placeholder) para o pipeline
-  // ter um artefato de verdade em disco.
+  // ------------------------------------------------------------- modo REAL
+  // PLUG AQUI: ElevenLabs / Azure TTS / Google TTS.
+  // Enquanto nao ha chave de TTS, geramos uma faixa AAC real com a duracao
+  // certa (silenciosa) — o .mp4 sai assistivel e com audio valido.
+  if (ctx.real) {
+    const arquivo = path.join(ctx.tempDir, 'narracao.m4a');
+    const faixa = await render.faixaAudio({
+      arquivo,
+      duracao: ctx.roteiro.duracaoEstimada,
+      texto: ctx.roteiro.texto,
+      tempDir: ctx.tempDir,
+    });
+    const stat = await fsp.stat(arquivo);
+    const audio = {
+      arquivo,
+      voz: faixa.silencio ? `${nicho.voice} (nao sintetizada)` : faixa.voz,
+      duracao: ctx.roteiro.duracaoEstimada,
+      formato: 'm4a/aac',
+      bitrate: '128kbps',
+      sampleRate: 44100,
+      tamanhoBytes: stat.size,
+      silencio: faixa.silencio,
+      simulado: false,
+    };
+    log(faixa.silencio
+      ? `✅ faixa de audio real gerada, porem SILENCIOSA (sem TTS configurado — veja TTS_CMD)`
+      : `✅ narracao sintetizada (${faixa.voz}, ${audio.duracao}s)`, 'ok');
+    return { audio };
+  }
+
+  // -------------------------------------------------------- modo SIMULACAO
+  await trabalhar(900, 1800);
+  const arquivo = path.join(ctx.tempDir, 'narracao.mp3');
   const payload = [
     '# narracao simulada (placeholder)',
     `voz: ${nicho.voice}`,
@@ -435,6 +464,34 @@ async function agentImagens(ctx, log) {
   const cores = pick(PALETAS);
   const imagens = [];
 
+  // ------------------------------------------------------------- modo REAL
+  // PNG 1080x1920 de verdade, desenhado pelo ffmpeg (gradiente + legenda).
+  if (ctx.real) {
+    for (const cena of cenas) {
+      const arquivo = path.join(ctx.tempDir, `cena-${cena.index}.png`);
+      await render.imagemCena({
+        arquivo,
+        tempDir: ctx.tempDir,
+        titulo: ctx.roteiro.titulo,
+        legenda: cena.texto,
+        indice: cena.index,
+        total: cenas.length,
+        cores,
+      });
+      const stat = await fsp.stat(arquivo);
+      imagens.push({
+        arquivo, cena: cena.index,
+        largura: config.VIDEO.WIDTH, altura: config.VIDEO.HEIGHT,
+        origem: 'gerada (ffmpeg)', prompt: cena.prompt,
+        tamanhoBytes: stat.size, simulado: false,
+      });
+      log(`🖼️ imagem ${cena.index}/${cenas.length} renderizada (png real)`);
+    }
+    log(`✅ ${imagens.length} imagens prontas`);
+    return { imagens };
+  }
+
+  // -------------------------------------------------------- modo SIMULACAO
   for (const cena of cenas) {
     await trabalhar(350, 700);
     const arquivo = path.join(ctx.tempDir, `cena-${cena.index}.svg`);
@@ -474,7 +531,7 @@ async function agentEdicao(ctx, log) {
   const nomeBase = `${slug(ctx.roteiro.titulo) || 'video'}-${ctx.videoId.slice(-6)}`;
   const arquivoVideo = path.join(config.PATHS.OUTPUT, `${nomeBase}.${config.VIDEO.FORMAT}`);
   const arquivoManifesto = path.join(config.PATHS.OUTPUT, `${nomeBase}.json`);
-  const arquivoThumb = path.join(config.PATHS.OUTPUT, `${nomeBase}-thumb.svg`);
+  const arquivoThumb = path.join(config.PATHS.OUTPUT, `${nomeBase}-thumb.${ctx.real ? 'png' : 'svg'}`);
 
   // Monta a timeline (o que o ffmpeg receberia de verdade).
   let cursor = 0;
@@ -491,15 +548,34 @@ async function agentEdicao(ctx, log) {
     return entrada;
   });
 
-  // PLUG AQUI: ffmpeg real, por exemplo:
-  //   ffmpeg -framerate 30 -i cena-%d.svg -i narracao.mp3 \
-  //          -vf scale=1080:1920 -c:v libx264 -pix_fmt yuv420p saida.mp4
-  await trabalhar(1200, 2400);
+  // ------------------------------------------------------------- modo REAL
+  // O ffmpeg monta de verdade: um segmento por cena com Ken Burns e fade,
+  // concatenados e muxados com o audio. `inspecionar` le o arquivo gerado
+  // para o manifesto nao mentir sobre o que saiu.
+  let probe = null;
+  if (ctx.real) {
+    await render.montarVideo({
+      saida: arquivoVideo,
+      tempDir: ctx.tempDir,
+      cenas: ctx.imagens.map((img, i) => ({
+        indice: img.cena,
+        imagem: img.arquivo,
+        duracao: ctx.roteiro.cenas[i] ? ctx.roteiro.cenas[i].duracao : 2,
+      })),
+      audio: ctx.audio.arquivo,
+      duracaoTotal: cursor,
+    });
+    probe = await render.inspecionar(arquivoVideo);
+    log(`🎞️ render real: ${probe.largura}x${probe.altura} ${probe.codecVideo}/${probe.codecAudio} · ${probe.duracao}s · ${(probe.bytes / 1024 / 1024).toFixed(2)}MB`);
+  } else {
+    await trabalhar(1200, 2400);
+  }
 
   const manifesto = {
     videoId: ctx.videoId,
     titulo: ctx.roteiro.titulo,
     nicho: ctx.nicho,
+    render: probe ? { real: true, ...probe } : { real: false, motivo: 'ffmpeg indisponivel ou RENDER_REAL=false' },
     descricao: `${ctx.roteiro.texto}\n\n${nicho.hashtags.join(' ')}`,
     hashtags: nicho.hashtags,
     resolucao: `${config.VIDEO.WIDTH}x${config.VIDEO.HEIGHT}`,
@@ -516,19 +592,21 @@ async function agentEdicao(ctx, log) {
 
   await fsp.writeFile(arquivoManifesto, JSON.stringify(manifesto, null, 2), 'utf8');
 
-  // Placeholder do arquivo de video (em producao seria o mp4 do ffmpeg).
-  const conteudoVideo = [
-    '### VIDEO SIMULADO — placeholder gerado pelo Agent Edicao ###',
-    `titulo: ${manifesto.titulo}`,
-    `resolucao: ${manifesto.resolucao} @ ${manifesto.fps}fps`,
-    `duracao: ${manifesto.duracao}s`,
-    `cenas: ${timeline.length}`,
-    '',
-    'Plugue o ffmpeg em agents.js (agentEdicao) para gerar o mp4 de verdade.',
-  ].join('\n');
-  await fsp.writeFile(arquivoVideo, conteudoVideo, 'utf8');
+  if (!ctx.real) {
+    // Placeholder do arquivo de video (sem ffmpeg na maquina).
+    const conteudoVideo = [
+      '### VIDEO SIMULADO — placeholder gerado pelo Agent Edicao ###',
+      `titulo: ${manifesto.titulo}`,
+      `resolucao: ${manifesto.resolucao} @ ${manifesto.fps}fps`,
+      `duracao: ${manifesto.duracao}s`,
+      `cenas: ${timeline.length}`,
+      '',
+      'Instale o ffmpeg para gerar o mp4 de verdade (o pipeline detecta sozinho).',
+    ].join('\n');
+    await fsp.writeFile(arquivoVideo, conteudoVideo, 'utf8');
+  }
 
-  // Thumbnail = primeira cena.
+  // Thumbnail = primeira cena (png no modo real, svg na simulacao).
   if (ctx.imagens[0]) {
     await fsp.copyFile(ctx.imagens[0].arquivo, arquivoThumb);
   }
@@ -537,16 +615,18 @@ async function agentEdicao(ctx, log) {
     arquivo: arquivoVideo,
     manifesto: arquivoManifesto,
     thumbnail: ctx.imagens[0] ? arquivoThumb : null,
-    duracao: manifesto.duracao,
+    duracao: probe ? probe.duracao : manifesto.duracao,
     resolucao: manifesto.resolucao,
-    tamanhoBytes: Buffer.byteLength(conteudoVideo),
+    tamanhoBytes: probe ? probe.bytes : (await fsp.stat(arquivoVideo)).size,
+    real: Boolean(probe),
+    probe,
     timeline,
     titulo: manifesto.titulo,
     descricao: manifesto.descricao,
     hashtags: manifesto.hashtags,
   };
 
-  log(`✅ video montado: ${path.basename(arquivoVideo)} (${video.duracao}s, ${video.resolucao})`);
+  log(`✅ video montado: ${path.basename(arquivoVideo)} (${video.duracao}s, ${video.resolucao}${probe ? ', MP4 REAL' : ', placeholder'})`);
   return { video };
 }
 
@@ -589,6 +669,7 @@ module.exports = {
   agentEdicao,
   publicarYoutube,
   limparCacheLotes,
+  render,
   // utilitarios reutilizados pelo orchestrator/testes
   utils: { sleep, slug, contarPalavras, estimarDuracao, trabalhar },
   AGENTES: [

@@ -97,6 +97,7 @@ function createVideo(data) {
       atualizadoEm: new Date().toISOString(),
       lote: data.lote || null,
       origem: data.origem || 'manual', // manual | auto (piloto automatico)
+      render: null,                     // 'real' (mp4 via ffmpeg) | 'simulado'
     },
     data
   );

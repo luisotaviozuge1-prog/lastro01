@@ -30,7 +30,7 @@ O `demo.html` é uma porta fiel do pipeline para o navegador: os mesmos 5 agente
 
 ```bash
 npm install
-npm test     # 60 verificações de ponta a ponta (~4s, sem Redis, sem API externa)
+npm test     # 72 verificações de ponta a ponta (~4s, sem Redis, sem API externa)
 npm start    # sobe o servidor em :3000
 ```
 
@@ -41,6 +41,51 @@ No dashboard:
 3. **⚡ Gerar 10 Vídeos** → a fila processa 2 por vez, sem travar
 4. **📤 POSTAR** → "envia" pro YouTube e mostra a URL
 5. **⬇ baixar** / **{ } json** → baixa o vídeo e o manifesto (timeline, script, hashtags)
+
+---
+
+## 🎞️ Vídeo de verdade (MP4 via ffmpeg)
+
+Se o **ffmpeg** estiver instalado, o Agent Edição para de escrever placeholder e monta um `.mp4` real:
+
+- **1080x1920, H.264 + AAC, 30fps**, pronto para Shorts/Reels/TikTok
+- uma cena por bloco do roteiro, com **Ken Burns** (zoom lento) e **fade** entre elas
+- **legenda queimada no quadro**, título no topo e contador de cena no rodapé
+- `-movflags +faststart`: começa a tocar antes de baixar inteiro
+- o manifesto registra o que o **ffprobe** leu do arquivo gerado, não o que foi pedido
+
+No dashboard aparece o botão **▶ assistir**, que toca o vídeo ali mesmo.
+
+```bash
+# Ubuntu/Debian        sudo apt install ffmpeg
+# macOS                brew install ffmpeg
+# Windows              winget install Gyan.FFmpeg
+npm start   # o console diz: 🎞️ render: ffmpeg encontrado
+```
+
+**Sem ffmpeg nada quebra**: o sistema detecta sozinho, volta para o placeholder, marca o vídeo como `PLACEHOLDER` no dashboard e avisa no console. `npm install` continua sem dependência nativa.
+
+### A narração ainda é muda
+
+O vídeo sai com uma faixa AAC real, mas **silenciosa** — não há TTS instalado por padrão. Duas saídas:
+
+```bash
+# 1) qualquer TTS de linha de comando ({texto} = arquivo de entrada, {saida} = wav)
+sudo apt install espeak-ng
+TTS_CMD="espeak-ng -v pt-br -w {saida} -f {texto}" npm start
+
+# 2) TTS de verdade (ElevenLabs / Azure / Google): PLUG AQUI em render.js → faixaAudio()
+```
+
+| Variável | Padrão | Para quê |
+|---|---|---|
+| `RENDER_REAL` | `true` | `false` força o placeholder mesmo com ffmpeg |
+| `RENDER_CRF` | `23` | qualidade (menor = melhor e mais pesado) |
+| `RENDER_PRESET` | `veryfast` | velocidade do x264 |
+| `RENDER_FONTE` | auto | caminho da fonte da legenda |
+| `TTS_CMD` | — | comando de TTS para a narração |
+
+Custo: ~12s de ffmpeg por vídeo nesta máquina (além do pipeline). Com concorrência 2, 10 vídeos saem em ~1 minuto.
 
 ---
 
@@ -147,6 +192,7 @@ npm start                         # o console mostra: 🧵 fila: BullMQ + Redis
 | `POST` | `/api/post-video` | body `{ "id": "vid_..." }` → "posta" no YouTube |
 | `GET` | `/api/videos?status=ready&nicho=gta6` | lista de vídeos |
 | `GET` | `/api/videos/:id` | registro completo (script, timeline, arquivos) |
+| `GET` | `/api/watch/:id` | toca o vídeo inline (com seek) — só no modo real |
 | `GET` | `/api/download/:id` | baixa o arquivo do vídeo |
 | `GET` | `/api/download/:id/manifest` | baixa o manifesto JSON |
 | `GET` | `/api/thumb/:id` | thumbnail |
@@ -195,6 +241,7 @@ agents.js         os 5 agentes + publicação no YouTube
 orchestrator.js   pipeline de 1 vídeo (paralelo + limpeza de temp)
 queue.js          fila de trabalhos (BullMQ/Redis com fallback em memória)
 autopilot.js      piloto automático: continua gerando quando ninguém mexe
+render.js         renderização real com ffmpeg (mp4 1080x1920 + png das cenas)
 store.js          persistência JSON (data/videos.json) + anti-repetição + stats
 server.js         API REST + servidor do dashboard
 dashboard.html    dashboard web do servidor (HTML + Fetch API, sem build)
@@ -251,9 +298,9 @@ Cada agente tem um comentário **`PLUG AQUI`** marcando exatamente onde entra a 
 |---|---|
 | Pesquisa | Google Trends / Reddit API / YouTube Data API |
 | Roteiro | Claude / GPT |
-| Áudio | ElevenLabs / Azure TTS / Google TTS |
+| Áudio | ElevenLabs / Azure TTS / Google TTS (ou `TTS_CMD`) |
 | Imagens | DALL·E / Stable Diffusion / Pexels |
-| Edição | `ffmpeg` (o comando sugerido está no comentário) |
+| Edição | ✅ **já plugado** — `render.js` gera o mp4 de verdade |
 | Postagem | YouTube Data API v3 (`videos.insert`) |
 
 A estrutura de dados já é a final — trocar a simulação pela API real não muda o pipeline, a fila nem o dashboard.
