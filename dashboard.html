@@ -73,6 +73,10 @@
   .pill.failed{background:#4a1b1f;color:#ff9b9b}
   .acoes{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
   .empty{color:var(--muted);text-align:center;padding:26px 0;font-size:13.5px}
+  .tag-auto{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:6px;background:#2a2550;color:#c4b5fd;font-size:10.5px;font-weight:700;vertical-align:middle}
+  .badge.auto-on{border-color:var(--violet);color:#d4b3ff}
+  .badge.auto-work{border-color:var(--green);color:#5ef0a8;animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
 
   #toast{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50}
   .t{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--green);border-radius:10px;padding:11px 14px;font-size:13.5px;max-width:340px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
@@ -92,6 +96,7 @@
       <span class="badge"><i class="dot" id="dot"></i><span id="driver">conectando...</span></span>
       <span class="badge" id="conc">—</span>
       <span class="badge" id="simBadge">—</span>
+      <span class="badge" id="autoBadge" style="cursor:pointer" title="Clique para ligar/desligar o piloto automatico">🤖 —</span>
     </div>
   </header>
 
@@ -104,9 +109,11 @@
       <input type="number" id="qtd" value="10" min="1" max="50" style="width:84px" title="Quantidade">
       <button class="bulk" id="btnN">⚡ Gerar 10 Videos</button>
       <button class="ghost sm" id="btnPostAll" title="Posta todos os videos prontos">📤 Postar todos os prontos</button>
+      <button class="ghost sm" id="btnAuto" title="Se ninguem mexer, o sistema continua gerando sozinho">🤖 Piloto automatico</button>
       <button class="ghost sm" id="btnClear" title="Apaga fila e historico">🗑️ Limpar tudo</button>
     </div>
     <div class="sub" id="melhorias">—</div>
+    <div class="sub" id="autoInfo" style="margin-top:6px">—</div>
   </div>
 
   <!-- ----------------------------------------------------------- stats -->
@@ -220,6 +227,42 @@ $('btnPostAll').onclick = async () => {
   finally { b.disabled = false; }
 };
 
+/* ------------------------------------------------- piloto automatico --- */
+let autoAtivo = null;
+
+async function toggleAuto() {
+  try {
+    const r = await api('POST', '/api/autopilot', { ativo: !autoAtivo });
+    toast(r.autopilot.ativo
+      ? '🤖 piloto automatico LIGADO — sem ninguem mexer, ele gera sozinho'
+      : '🤖 piloto automatico desligado');
+    render();
+  } catch (e) { toast('❌ ' + e.message, true); }
+}
+$('btnAuto').onclick = toggleAuto;
+$('autoBadge').onclick = toggleAuto;
+
+function tempoHumano(seg) {
+  if (seg < 60) return seg + 's';
+  const m = Math.floor(seg / 60);
+  return m < 60 ? m + 'min' : Math.floor(m / 60) + 'h' + (m % 60) + 'min';
+}
+
+function renderAuto(a) {
+  autoAtivo = a.ativo;
+  const badge = $('autoBadge');
+  badge.className = 'badge' + (a.emAcao ? ' auto-work' : (a.ativo ? ' auto-on' : ''));
+  badge.textContent = a.ativo
+    ? (a.emAcao ? `🤖 gerando sozinho (${a.geradosAuto})` : `🤖 piloto ON · inativo ${tempoHumano(a.inativoSegundos)}`)
+    : '🤖 piloto OFF';
+  $('btnAuto').textContent = a.ativo ? '🤖 Piloto automatico: ON' : '🤖 Piloto automatico: OFF';
+  $('btnAuto').style.background = a.ativo ? 'linear-gradient(90deg,#6d28d9,#8b5cf6)' : 'transparent';
+  $('autoInfo').textContent = a.ativo
+    ? `Piloto automatico ligado: depois de ${tempoHumano(a.idleLimiteSegundos)} sem ninguem mexer, gera ${a.loteCiclo} video(s) por ciclo ` +
+      `(max ${a.maxFila} na fila, ${a.maxPorHora}/hora). Ja gerou ${a.geradosAuto} sozinho · ${a.geradosUltimaHora}/${a.maxPorHora} nesta hora.`
+    : 'Piloto automatico desligado — o sistema só gera quando você clicar.';
+}
+
 /* -------------------------------------------------------------- render --- */
 function statCard(valor, rotulo, cor) {
   return `<div class="stat ${cor || ''}"><b>${valor}</b><small>${rotulo}</small></div>`;
@@ -238,6 +281,8 @@ function render() {
       `Melhorias ativas: ${m.PARALELO ? '1) audio+imagens em paralelo · ' : ''}${d.sistema.maxTentativas > 1 ? '2) retry automatico · ' : ''}` +
       `${m.LIMPEZA_TEMP ? '3) limpeza de temp · ' : ''}${m.ANTI_REPETICAO ? `4) anti-repeticao (ultimos ${m.ANTI_REPETICAO_JANELA}) · ` : ''}` +
       `${m.LOTE_PESQUISA ? `5) pesquisa em lote (economia: ${d.stats.apiCallsEconomizadas} chamadas)` : ''}`;
+
+    renderAuto(d.autopilot);
 
     // nichos (uma vez)
     if (!nichosCarregados) {
@@ -265,7 +310,7 @@ function render() {
       ? jobs.map((j) => `
         <div class="job">
           <div class="row">
-            <strong>${j.status === 'processing' ? '⏳' : '🕒'} ${escapeHtml(j.topico || j.nicho)}</strong>
+            <strong>${j.status === 'processing' ? '⏳' : '🕒'} ${escapeHtml(j.topico || j.nicho)}${j.origem === 'auto' ? '<span class="tag-auto">🤖 AUTO</span>' : ''}</strong>
             <span class="id">${j.id}</span>
           </div>
           <div class="bar"><i style="width:${j.progresso || 0}%"></i></div>
@@ -311,8 +356,9 @@ function linhaVideo(v) {
     ? `<small style="color:var(--red)">${escapeHtml(v.erro || 'falhou')}</small>`
     : `<small>${v.id}${v.duracao ? ' · ' + v.duracao + 's' : ''}${v.tempoGeracaoSegundos ? ' · gerado em ' + v.tempoGeracaoSegundos + 's' : ''}</small>`;
 
+  const tagAuto = v.origem === 'auto' ? '<span class="tag-auto">🤖 AUTO</span>' : '';
   return `<tr>
-    <td class="title">${escapeHtml(v.titulo)}${detalhe}</td>
+    <td class="title">${escapeHtml(v.titulo)}${tagAuto}${detalhe}</td>
     <td>${escapeHtml(v.nicho)}</td>
     <td><span class="pill ${v.status}">${v.status}</span></td>
     <td><div class="acoes">${acoes.join('')}</div></td>

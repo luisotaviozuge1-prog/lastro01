@@ -116,6 +116,28 @@ const config = {
     FAIL_RATE: Math.max(0, Math.min(num(process.env.AGENT_FAIL_RATE, 0), 1)),
   },
 
+  // ------------------------------------------------ piloto automatico ("fique ligado")
+  // Se ninguem mexer por IDLE_MS, o sistema continua gerando video sozinho.
+  AUTOPILOT: {
+    ATIVO: bool(process.env.AUTO_PILOT, true),
+    // 5 minutos sem ninguem mexer -> o piloto assume
+    IDLE_MS: num(process.env.AUTO_PILOT_IDLE_MS, 5 * 60 * 1000),
+    // de quanto em quanto tempo ele verifica
+    CHECK_MS: num(process.env.AUTO_PILOT_CHECK_MS, 30 * 1000),
+    // quantos videos ele enfileira por ciclo
+    LOTE: num(process.env.AUTO_PILOT_LOTE, 2),
+    // travas de seguranca
+    MAX_FILA: num(process.env.AUTO_PILOT_MAX_FILA, 4),
+    MAX_POR_HORA: num(process.env.AUTO_PILOT_MAX_POR_HORA, 20),
+    // batimento no console provando que esta ligado
+    HEARTBEAT_MS: num(process.env.AUTO_PILOT_HEARTBEAT_MS, 60 * 1000),
+    // nichos que o piloto usa (alternando). vazio = todos
+    NICHOS: (process.env.AUTO_PILOT_NICHOS || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  },
+
   // -------------------------------------------------------------- publicacao
   YOUTUBE: {
     SIMULADO: bool(process.env.YOUTUBE_SIMULADO, true),

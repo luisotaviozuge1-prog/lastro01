@@ -55,10 +55,16 @@ async function limparTempOrfaos() {
     const entradas = await fsp.readdir(config.PATHS.TEMP, { withFileTypes: true });
     let n = 0;
     for (const e of entradas) {
-      if (e.isDirectory()) {
-        await limparPasta(path.join(config.PATHS.TEMP, e.name));
-        n++;
-      }
+      if (!e.isDirectory()) continue;
+      const dir = path.join(config.PATHS.TEMP, e.name);
+      // Só apaga pastas paradas ha mais de 5 min: se outra instancia estiver
+      // usando o mesmo DATA_DIR, nao derrubamos o trabalho dela.
+      try {
+        const info = await fsp.stat(dir);
+        if (Date.now() - info.mtimeMs < 5 * 60 * 1000) continue;
+      } catch { /* sumiu no meio do caminho, segue */ }
+      await limparPasta(dir);
+      n++;
     }
     if (n) console.log(`🧹 limpeza inicial: ${n} pasta(s) temporaria(s) removida(s)`);
     return n;

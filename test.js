@@ -23,6 +23,12 @@ process.env.USE_REDIS = process.env.USE_REDIS || 'false';
 process.env.SIM_SPEED = process.env.SIM_SPEED || '0.08'; // ~12x mais rapido
 process.env.PORT = process.env.PORT || '3999';
 process.env.BACKOFF_MS = process.env.BACKOFF_MS || '50';
+// Piloto automatico: desligado no teste para nao interferir nas contagens;
+// a secao 9 liga na mao e testa o ciclo com inatividade de 0,5s.
+process.env.AUTO_PILOT = process.env.AUTO_PILOT || 'false';
+process.env.AUTO_PILOT_IDLE_MS = process.env.AUTO_PILOT_IDLE_MS || '500';
+process.env.AUTO_PILOT_CHECK_MS = process.env.AUTO_PILOT_CHECK_MS || '100000';
+process.env.AUTO_PILOT_LOTE = process.env.AUTO_PILOT_LOTE || '2';
 
 const fs = require('fs');
 const path = require('path');
@@ -33,6 +39,7 @@ const store = require('./store');
 const agents = require('./agents');
 const orchestrator = require('./orchestrator');
 const queue = require('./queue');
+const autopilot = require('./autopilot');
 
 let passou = 0;
 let falhou = 0;
@@ -272,6 +279,75 @@ async function main() {
   // ------------------------------------------------------------- download
   const download = await req('GET', `/api/download/${alvo.id}/manifest`);
   ok(download.status === 200, 'GET /api/download/:id/manifest baixa o manifesto');
+
+  // ------------------------------------- 9) piloto automatico ("fique ligado")
+  console.log('\n9) PILOTO AUTOMATICO — continua gerando sozinho apos inatividade');
+  ok(autopilot.snapshot().ativo === false, 'respeita AUTO_PILOT=false (desligado no teste)');
+  ok((await autopilot.ciclo()).acao === 'desligado', 'desligado: nao gera nada');
+
+  autopilot.setAtivo(true);
+  ok(autopilot.snapshot().ativo === true, 'POST /api/autopilot liga o piloto (setAtivo)');
+
+  // Acabou de "mexer" -> nao deve gerar nada
+  autopilot.registrarAtividade('teste');
+  ok((await autopilot.ciclo()).acao === 'tem gente mexendo', 'com gente mexendo, o piloto fica quieto');
+
+  // GET no dashboard NAO conta como interacao (senao o piloto nunca ligaria)
+  const antes = autopilot.snapshot().ultimaAtividade;
+  await req('GET', '/api/dashboard');
+  ok(autopilot.snapshot().ultimaAtividade === antes, 'polling do dashboard nao conta como interacao');
+
+  // POST conta como interacao
+  await req('POST', '/api/generate-video?nicho=gta6');
+  ok(autopilot.snapshot().ultimaAtividade !== antes, 'POST na API conta como interacao');
+  await esperar(async () => {
+    const d = await req('GET', '/api/dashboard');
+    return d.body.stats.naFila === 0 && d.body.stats.processando === 0;
+  }, 60000, 'fila esvaziar antes do piloto');
+
+  // Agora simula 5 min de inatividade (no teste: 0,5s) e roda um ciclo
+  autopilot.estado.ultimaAtividade = Date.now() - 60000;
+  const ciclo1 = await autopilot.ciclo();
+  ok(ciclo1.acao === 'gerou' && ciclo1.criados.length === 2,
+    `inativo: piloto gerou ${ciclo1.criados ? ciclo1.criados.length : 0} video(s) sozinho`);
+
+  const autoVideos = (await req('GET', '/api/videos')).body.videos.filter((v) => v.origem === 'auto');
+  ok(autoVideos.length === 2, `videos marcados com origem "auto" (${autoVideos.length})`);
+  ok(new Set(autoVideos.map((v) => v.nicho)).size === 2, 'piloto alterna os nichos (round-robin)');
+
+  // Trava: nao empilha mais que MAX_FILA
+  autopilot.estado.ultimaAtividade = Date.now() - 60000;
+  const ciclo2 = await autopilot.ciclo();
+  const travou = ciclo2.acao === 'fila cheia' || (ciclo2.criados || []).length <= config.AUTOPILOT.MAX_FILA;
+  ok(travou, `trava de fila respeitada (acao: ${ciclo2.acao})`);
+
+  // Trava: limite por hora
+  const historicoOriginal = autopilot.estado.historico.slice();
+  autopilot.estado.historico = Array(config.AUTOPILOT.MAX_POR_HORA).fill(Date.now());
+  autopilot.estado.ultimaAtividade = Date.now() - 60000;
+  ok((await autopilot.ciclo()).acao === 'limite por hora',
+    `trava de ${config.AUTOPILOT.MAX_POR_HORA} videos/hora respeitada`);
+  autopilot.estado.historico = historicoOriginal;
+
+  // Endpoint HTTP de liga/desliga
+  const off = await req('POST', '/api/autopilot', { ativo: false });
+  ok(off.status === 200 && off.body.autopilot.ativo === false, 'POST /api/autopilot desliga');
+  const on = await req('POST', '/api/autopilot', { ativo: true });
+  ok(on.status === 200 && on.body.autopilot.ativo === true, 'POST /api/autopilot liga de novo');
+  ok((await req('POST', '/api/autopilot', {})).status === 400, 'POST /api/autopilot sem "ativo" retorna 400');
+  const estadoHttp = await req('GET', '/api/autopilot');
+  ok(estadoHttp.body.autopilot.idleLimiteSegundos > 0, 'GET /api/autopilot expoe o limite de inatividade');
+
+  // O dashboard enxerga o piloto
+  const dashAuto = (await req('GET', '/api/dashboard')).body.autopilot;
+  ok(dashAuto && typeof dashAuto.geradosAuto === 'number',
+    `GET /api/dashboard traz o estado do piloto (${dashAuto.geradosAuto} gerados sozinho)`);
+
+  autopilot.stop();
+  await esperar(async () => {
+    const d = await req('GET', '/api/dashboard');
+    return d.body.stats.naFila === 0 && d.body.stats.processando === 0;
+  }, 90000, 'fila do piloto esvaziar');
 
   // --------------------------------------------------------------- fim
   server.close();

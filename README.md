@@ -18,7 +18,7 @@ Sem Redis instalado? Funciona igual — o sistema cai automaticamente para a fil
 
 ```bash
 npm install
-npm test     # 43 verificações de ponta a ponta (~4s, sem Redis, sem API externa)
+npm test     # 60 verificações de ponta a ponta (~4s, sem Redis, sem API externa)
 npm start    # sobe o servidor em :3000
 ```
 
@@ -29,6 +29,42 @@ No dashboard:
 3. **⚡ Gerar 10 Vídeos** → a fila processa 2 por vez, sem travar
 4. **📤 POSTAR** → "envia" pro YouTube e mostra a URL
 5. **⬇ baixar** / **{ } json** → baixa o vídeo e o manifesto (timeline, script, hashtags)
+
+---
+
+## 🤖 Piloto automático ("fique ligado")
+
+Se **ninguém mexer por 5 minutos**, o servidor não fica parado: ele continua ligado e **gerando vídeos sozinho**, alternando entre os nichos.
+
+```
+🤖 PILOTO AUTOMATICO: 5 min sem ninguem mexer — gerando 2 video(s) sozinho
+💓 ligado · inativo ha 6 min · piloto automatico LIGADO · 14 video(s) gerado(s) sozinho
+```
+
+- **O que conta como "alguém mexeu"**: qualquer POST/DELETE na API (gerar, postar, limpar) e downloads
+- **O que não conta**: o polling do dashboard (senão o piloto nunca ligaria com a aba aberta)
+- **Para na hora** em que você volta a clicar — e volta a assumir quando você sai de novo
+- **Heartbeat** no console a cada minuto provando que está vivo
+- Os vídeos criados sozinho aparecem com a tag **🤖 AUTO** no dashboard
+- Liga/desliga pelo botão **🤖 Piloto automático** ou por `POST /api/autopilot { "ativo": false }`
+
+Travas de segurança (para não lotar o disco sozinho):
+
+| Trava | Padrão | Variável |
+|---|---|---|
+| máximo de trabalhos pendentes | 4 | `AUTO_PILOT_MAX_FILA` |
+| máximo por hora | 20 | `AUTO_PILOT_MAX_POR_HORA` |
+| vídeos por ciclo | 2 | `AUTO_PILOT_LOTE` |
+| tempo de inatividade | 5 min | `AUTO_PILOT_IDLE_MS` |
+| de quanto em quanto verifica | 30s | `AUTO_PILOT_CHECK_MS` |
+| desligar de vez | — | `AUTO_PILOT=false` |
+
+Para ver funcionando em segundos, sem esperar 5 minutos:
+
+```bash
+AUTO_PILOT_IDLE_MS=8000 AUTO_PILOT_CHECK_MS=2000 npm start
+# saia do teclado por 10s e veja o console gerando sozinho
+```
 
 ---
 
@@ -103,7 +139,9 @@ npm start                         # o console mostra: 🧵 fila: BullMQ + Redis
 | `GET` | `/api/download/:id/manifest` | baixa o manifesto JSON |
 | `GET` | `/api/thumb/:id` | thumbnail |
 | `GET` | `/api/nichos` | nichos suportados |
-| `GET` | `/api/health` | healthcheck + contadores da fila |
+| `POST` | `/api/autopilot` | liga/desliga o piloto: `{ "ativo": true }` |
+| `GET` | `/api/autopilot` | estado do piloto (inatividade, gerados sozinho, travas) |
+| `GET` | `/api/health` | healthcheck + contadores da fila + piloto |
 | `DELETE` | `/api/videos` | limpa fila + histórico |
 
 Exemplos:
@@ -144,6 +182,7 @@ config.js         toda a configuração (nichos, fila, vídeo, melhorias)
 agents.js         os 5 agentes + publicação no YouTube
 orchestrator.js   pipeline de 1 vídeo (paralelo + limpeza de temp)
 queue.js          fila de trabalhos (BullMQ/Redis com fallback em memória)
+autopilot.js      piloto automático: continua gerando quando ninguém mexe
 store.js          persistência JSON (data/videos.json) + anti-repetição + stats
 server.js         API REST + servidor do dashboard
 dashboard.html    dashboard web (HTML + Fetch API, sem build)
@@ -173,6 +212,10 @@ data/             criado em runtime (gitignored)
 | `ANTI_REPETICAO_JANELA` | `10` | quantos vídeos olhar para trás |
 | `LOTE_TAMANHO` | `12` | tópicos por lote de pesquisa |
 | `JOB_TIMEOUT_MS` | `180000` | timeout de segurança por vídeo |
+| `AUTO_PILOT` | `true` | piloto automático ligado |
+| `AUTO_PILOT_IDLE_MS` | `300000` | 5 min de inatividade para o piloto assumir |
+| `AUTO_PILOT_LOTE` | `2` | vídeos por ciclo do piloto |
+| `AUTO_PILOT_MAX_POR_HORA` | `20` | teto de vídeos automáticos por hora |
 
 Exemplos:
 
@@ -216,3 +259,11 @@ O console mostra o erro com contexto. Os casos comuns:
 | `💀 video ... falhou depois de 3 tentativas` | erro real: a mensagem do agente aparece no dashboard e no log |
 | `videos.json invalido, iniciando banco novo` | o banco foi corrompido; o sistema se recupera sozinho |
 | `timeout de 180000ms excedido` | algum agente travou; ajuste `JOB_TIMEOUT_MS` |
+
+### Comportamentos que são de propósito
+
+- **"Limpar tudo" descarta trabalho em andamento**: os jobs que já estavam processando terminam, mas seus registros foram apagados — é uma ação destrutiva, o dashboard pede confirmação.
+- **`quantidade` acima de 100 é cortada em 100** por chamada; a resposta devolve a quantidade real enfileirada.
+- **Anti-repetição é uma janela, não um bloqueio eterno**: a partir do 11º vídeo do mesmo nicho, um tópico usado há mais de 10 vídeos pode voltar — é exatamente a regra pedida ("não repetir nos últimos 10").
+- **Vídeos `processing` de um servidor que caiu** viram `failed` no próximo boot, com o motivo `servidor reiniciado durante o processamento`.
+- **Limpeza de temp no boot** só apaga pastas paradas há mais de 5 min, para não atropelar outra instância usando o mesmo `DATA_DIR`.

@@ -96,6 +96,7 @@ function createVideo(data) {
       criadoEm: new Date().toISOString(),
       atualizadoEm: new Date().toISOString(),
       lote: data.lote || null,
+      origem: data.origem || 'manual', // manual | auto (piloto automatico)
     },
     data
   );

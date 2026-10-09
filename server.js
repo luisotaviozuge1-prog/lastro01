@@ -29,9 +29,14 @@ const config = require('./config');
 const store = require('./store');
 const queue = require('./queue');
 const agents = require('./agents');
+const autopilot = require('./autopilot');
 
 const app = express();
 app.use(express.json());
+
+// Piloto automatico: marca quando alguem realmente mexeu no sistema
+// (o polling do dashboard nao conta como interacao).
+app.use(autopilot.middleware);
 
 // Log simples de cada requisicao de API (ajuda a debugar no console).
 app.use((req, _res, next) => {
@@ -84,7 +89,14 @@ app.post('/api/generate-multiple', async (req, res) => {
     }
 
     const r = await queue.addMany(quantidade, nicho);
-    res.status(202).json({ ok: true, mensagem: `${r.quantidade} video(s) enfileirado(s)`, ...r });
+    const cortado = r.quantidade < Math.floor(quantidade);
+    res.status(202).json({
+      ok: true,
+      mensagem: cortado
+        ? `${r.quantidade} video(s) enfileirado(s) — limite de 100 por chamada (voce pediu ${Math.floor(quantidade)})`
+        : `${r.quantidade} video(s) enfileirado(s)`,
+      ...r,
+    });
   } catch (err) {
     falhar(res, 500, err.message);
   }
@@ -111,6 +123,7 @@ app.get('/api/dashboard', async (_req, res) => {
         porNicho: s.porNicho,
       },
       fila,
+      autopilot: autopilot.snapshot(),
       videos: store.listVideos({ limit: 100 }).map(resumoVideo),
       sistema: {
         driverFila: fila.driver,
@@ -202,8 +215,23 @@ app.get('/api/health', async (_req, res) => {
     driverFila: queue.driver,
     uptimeSegundos: Math.round(process.uptime()),
     contadores: await queue.counts(),
+    autopilot: autopilot.snapshot(),
   });
 });
+
+/**
+ * POST /api/autopilot — liga/desliga o piloto automatico.
+ * body `{ "ativo": true }` ou query `?ativo=false`
+ */
+app.post('/api/autopilot', (req, res) => {
+  const bruto = (req.body && req.body.ativo !== undefined) ? req.body.ativo : req.query.ativo;
+  if (bruto === undefined) return falhar(res, 400, 'informe ativo: POST /api/autopilot { "ativo": true }');
+  const ativo = /^(1|true|on|sim)$/i.test(String(bruto));
+  res.json({ ok: true, autopilot: autopilot.setAtivo(ativo) });
+});
+
+/** GET /api/autopilot — estado do piloto automatico. */
+app.get('/api/autopilot', (_req, res) => res.json({ ok: true, autopilot: autopilot.snapshot() }));
 
 /** DELETE /api/videos — zera fila + historico (util em testes). */
 app.delete('/api/videos', async (_req, res) => {
@@ -240,6 +268,7 @@ function resumoVideo(v) {
     erro: v.erro,
     youtube: v.youtube,
     lote: v.lote,
+    origem: v.origem || 'manual',
     temArquivo: Boolean(v.arquivo),
     criadoEm: v.criadoEm,
   };
@@ -252,6 +281,7 @@ async function start() {
   console.log('─'.repeat(60));
 
   const driver = await queue.init();
+  autopilot.start(queue);
 
   const server = app.listen(config.PORT, config.HOST, () => {
     console.log(`🌐 dashboard: http://localhost:${config.PORT}`);
@@ -259,6 +289,8 @@ async function start() {
     console.log(`🎞️  formato:   ${config.VIDEO.WIDTH}x${config.VIDEO.HEIGHT} @ ${config.VIDEO.FPS}fps (${config.VIDEO.MIN_DURATION}-${config.VIDEO.MAX_DURATION}s)`);
     console.log(`🧩 nichos:    ${config.NICHOS_LISTA.join(', ')}`);
     console.log(`⚙️  melhorias: paralelo=${config.MELHORIAS.PARALELO} retry=${config.MAX_ATTEMPTS}x limpeza=${config.MELHORIAS.LIMPEZA_TEMP} anti-repeticao=${config.MELHORIAS.ANTI_REPETICAO} lote=${config.MELHORIAS.LOTE_PESQUISA}`);
+    console.log('─'.repeat(60));
+    console.log(`🤖 piloto auto: apos ${Math.round(config.AUTOPILOT.IDLE_MS / 60000)} min sem ninguem mexer, o sistema continua gerando sozinho`);
     console.log('─'.repeat(60));
     console.log('Pronto! Abra o dashboard e clique em "Gerar 1 Video".\n');
   });
@@ -276,6 +308,7 @@ async function start() {
   const encerrar = async (sinal) => {
     console.log(`\n${sinal} recebido, encerrando...`);
     server.close();
+    autopilot.stop();
     await queue.close();
     process.exit(0);
   };

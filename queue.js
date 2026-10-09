@@ -302,18 +302,18 @@ async function init() {
 }
 
 /** Enfileira 1 video. */
-async function addVideo({ nicho, lote = null } = {}) {
+async function addVideo({ nicho, lote = null, origem = 'manual' } = {}) {
   if (!iniciado) await init();
   const nichoOk = config.resolveNicho(nicho);
   const videoId = orchestrator.novoVideoId();
 
-  store.createVideo({ id: videoId, nicho: nichoOk, lote, status: 'queued', etapa: 'na fila' });
+  store.createVideo({ id: videoId, nicho: nichoOk, lote, origem, status: 'queued', etapa: 'na fila' });
 
   let jobId;
   if (driver === 'bullmq') {
     const job = await bull.queue.add(
       'gerar-video',
-      { videoId, nicho: nichoOk, lote },
+      { videoId, nicho: nichoOk, lote, origem },
       {
         attempts: config.MAX_ATTEMPTS, // MELHORIA 2
         backoff: { type: 'exponential', delay: config.BACKOFF_MS },
@@ -323,11 +323,11 @@ async function addVideo({ nicho, lote = null } = {}) {
     );
     jobId = String(job.id);
   } else {
-    jobId = memory.add({ videoId, nicho: nichoOk, lote }).id;
+    jobId = memory.add({ videoId, nicho: nichoOk, lote, origem }).id;
   }
 
   store.updateVideo(videoId, { jobId });
-  console.log(`➕ enfileirado: video ${videoId} (job ${jobId}, nicho ${nichoOk})`);
+  console.log(`➕ enfileirado: video ${videoId} (job ${jobId}, nicho ${nichoOk}${origem === 'auto' ? ', 🤖 automatico' : ''})`);
   return { videoId, jobId, nicho: nichoOk };
 }
 
@@ -385,6 +385,7 @@ async function snapshot() {
       topico: v.topico,
       erro: v.erro,
       lote: v.lote,
+      origem: v.origem || 'manual',
       criadoEm: v.criadoEm,
     }))
     .sort((a, b) => (b.status === 'processing' ? 1 : 0) - (a.status === 'processing' ? 1 : 0));
