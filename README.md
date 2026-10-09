@@ -14,6 +14,18 @@ Sem Redis instalado? Funciona igual — o sistema cai automaticamente para a fil
 
 ---
 
+## 🔗 Acesso rápido (sem instalar nada)
+
+| O quê | Onde |
+|---|---|
+| **Demo clicável** (mesmo pipeline, rodando no navegador) | https://claude.ai/artifact/GCdUZ5iLw17ZEd9Sqxet34 |
+| **Demo local** (abre com dois cliques, offline, sem npm) | `demo.html` |
+| **Sistema real** (fila, Redis, API, arquivos em disco) | `npm install && npm start` → http://localhost:3000 |
+
+O `demo.html` é uma porta fiel do pipeline para o navegador: os mesmos 5 agentes, concorrência 2, retry com backoff, anti-repetição, pesquisa em lote e o piloto automático (com 30s de inatividade em vez de 5 min, para você ver funcionando sem esperar). Ele **não** substitui o servidor: quem grava arquivo em disco, usa BullMQ/Redis e expõe a API é o `npm start`.
+
+---
+
 ## 🚀 Teste rápido
 
 ```bash
@@ -185,7 +197,8 @@ queue.js          fila de trabalhos (BullMQ/Redis com fallback em memória)
 autopilot.js      piloto automático: continua gerando quando ninguém mexe
 store.js          persistência JSON (data/videos.json) + anti-repetição + stats
 server.js         API REST + servidor do dashboard
-dashboard.html    dashboard web (HTML + Fetch API, sem build)
+dashboard.html    dashboard web do servidor (HTML + Fetch API, sem build)
+demo.html         demo do pipeline rodando 100% no navegador (sem backend)
 test.js           teste rápido de ponta a ponta
 README.md         este arquivo
 

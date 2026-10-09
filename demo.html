@@ -1,0 +1,831 @@
+<title>Viral Video Orchestrator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* Layout: sala de controle vertical — barra de identidade, controles, placar,
+   duas colunas (fila | console do servidor), tabela de videos, preview 9:16. */
+:root{
+  /* paleta unica (sala de controle escura, proposital) */
+  --ink:#0a0d16;        /* fundo */
+  --panel:#111624;      /* cartao */
+  --panel-2:#171d2f;    /* cartao interno */
+  --line:#232a3f;       /* bordas */
+  --fg:#e9ecf5;         /* texto */
+  --fg-dim:#8d96ad;     /* texto secundario */
+  --brand:#ff2e88;      /* acento 1 */
+  --brand-2:#8b5cf6;    /* acento 2 */
+  --ok:#1ed98a;         /* pronto */
+  --warn:#ffb020;       /* processando */
+  --info:#4a9dff;       /* postado */
+  --bad:#ff5666;        /* falha */
+  /* tipografia */
+  --display:"Chakra Petch","Trebuchet MS",system-ui,sans-serif;
+  --body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-text-size-adjust:100%}
+.wrap{max-width:1200px;margin:0 auto;padding-block:26px 64px;padding-left:16px;padding-right:16px}
+h1{font-family:var(--display);font-size:clamp(23px,5vw,31px);margin:0;letter-spacing:-.3px;text-wrap:balance}
+h1 em{font-style:normal;background:linear-gradient(95deg,var(--brand),var(--brand-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+h2{font-family:var(--display);font-size:12.5px;text-transform:uppercase;letter-spacing:1.1px;color:var(--fg-dim);margin:0 0 14px}
+.sub{color:var(--fg-dim);font-size:13px}
+a{color:var(--info)}
+:focus-visible{outline:2px solid var(--brand-2);outline-offset:2px}
+
+/* ------------------------------------------------------------- cabecalho */
+.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;margin-bottom:16px}
+.badges{display:flex;gap:7px;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:6px;background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:11.5px;color:var(--fg-dim);font-family:var(--mono)}
+.badge b{color:var(--fg);font-weight:600}
+.badge.on{border-color:var(--brand-2);color:#d6c2ff}
+.badge.live{border-color:var(--ok);color:#6ef0ab}
+@media (prefers-reduced-motion:no-preference){.badge.live{animation:pulse 1.8s ease-in-out infinite}}
+@keyframes pulse{50%{opacity:.5}}
+
+.aviso{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;justify-content:space-between;background:linear-gradient(95deg,rgba(255,46,136,.11),rgba(139,92,246,.11));border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:12px;padding:12px 14px;margin-bottom:20px;font-size:13px;color:var(--fg-dim)}
+.aviso b{color:var(--fg);font-weight:600}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}
+.stack{display:flex;flex-direction:column;gap:18px}
+
+/* ------------------------------------------------------------- controles */
+.controls{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+select,input[type=number]{background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:14px}
+input[type=number]{width:78px;font-family:var(--mono)}
+button{cursor:pointer;border:1px solid var(--line);border-radius:10px;padding:10px 15px;font:inherit;font-size:13.5px;font-weight:600;color:var(--fg);background:var(--panel-2);transition:filter .15s,transform .1s,border-color .15s}
+button:hover{filter:brightness(1.18)}
+button:active{transform:translateY(1px)}
+button[disabled]{opacity:.45;cursor:not-allowed}
+button.primary{background:linear-gradient(95deg,var(--brand),var(--brand-2));border-color:transparent;color:#fff}
+button.bulk{background:linear-gradient(95deg,#f59e0b,#ef4444);border-color:transparent;color:#1a0e02}
+button.sm{padding:6px 11px;font-size:12px;border-radius:8px}
+button.post{background:var(--ok);border-color:transparent;color:#04281a}
+button.auto-on{background:linear-gradient(95deg,#6d28d9,#a855f7);border-color:transparent;color:#fff}
+button.danger{border-color:#54232b;color:#ffb3ba}
+.switch{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--fg-dim);background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.switch input{accent-color:var(--brand);width:15px;height:15px}
+
+/* ----------------------------------------------------------------- placar */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:11px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:13px 14px}
+.stat b{display:block;font-family:var(--display);font-size:27px;line-height:1.15;font-variant-numeric:tabular-nums}
+.stat span{color:var(--fg-dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;font-weight:600}
+.stat.ok b{color:var(--ok)}.stat.warn b{color:var(--warn)}.stat.info b{color:var(--info)}
+.stat.bad b{color:var(--bad)}.stat.brand b{color:#c9a9ff}
+
+.cols{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+.cols>*{min-width:0}
+@media(min-width:920px){.cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+
+/* ------------------------------------------------------------------ fila */
+.job{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:11px 12px;margin-bottom:9px}
+.job:last-child{margin-bottom:0}
+.job .l1{display:flex;gap:8px;justify-content:space-between;align-items:baseline;font-size:13px}
+.job strong{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.mono{font-family:var(--mono);font-size:11px;color:var(--fg-dim);overflow-wrap:anywhere}
+/* nowrap so onde o texto e curto por natureza (id, selo) — nunca em linha
+   corrida, senao ela empurra a pagina para o lado no celular */
+.job .l1 .mono,.badge{white-space:nowrap}
+.bar{height:7px;background:#0a0e18;border-radius:999px;overflow:hidden;margin-top:9px}
+.bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(95deg,var(--brand),var(--brand-2));transition:width .35s ease}
+.bar.retry i{background:linear-gradient(95deg,var(--warn),var(--bad))}
+.job .l2{display:flex;gap:8px;justify-content:space-between;margin-top:6px;font-size:11.5px;color:var(--fg-dim);font-family:var(--mono)}
+.empty{color:var(--fg-dim);text-align:center;padding:24px 8px;font-size:13px}
+
+/* --------------------------------------------------------------- console */
+#log{background:#070a12;border:1px solid var(--line);border-radius:12px;padding:12px;height:290px;overflow:auto;font-family:var(--mono);font-size:11.5px;line-height:1.75;color:#aab4cc}
+#log div{overflow-wrap:anywhere}
+#log .l-ok{color:#7fe8b4}#log .l-bad{color:#ff8f99}#log .l-warn{color:#ffd27d}
+#log .l-auto{color:#d0b3ff}#log .l-head{color:#fff;font-weight:600}
+
+/* ---------------------------------------------------------------- videos */
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;color:var(--fg-dim);padding:0 9px 9px;font-weight:600;white-space:nowrap}
+td{padding:9px;border-top:1px solid var(--line);vertical-align:middle}
+tr.sel td{background:rgba(139,92,246,.09)}
+tr.clickable{cursor:pointer}
+tr.clickable:hover td{background:rgba(255,255,255,.03)}
+.tit{font-weight:600;min-width:200px;overflow-wrap:anywhere}
+.tit small{display:block;color:var(--fg-dim);font-weight:400;font-size:11px;font-family:var(--mono)}
+.pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;font-family:var(--mono)}
+.pill.queued{background:#242c42;color:#b5c0dd}
+.pill.processing{background:#3b2a16;color:var(--warn)}
+.pill.ready{background:#0d3828;color:#64efad}
+.pill.posted{background:#0f2e51;color:#8fcaff}
+.pill.failed{background:#45191f;color:#ff9aa3}
+.tag{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:6px;font-size:9.5px;font-weight:700;font-family:var(--mono);vertical-align:middle}
+.tag.auto{background:#2a2350;color:#c9b2ff}
+.tag.ex{background:#1e2a3b;color:#93b4d6}
+.acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+
+/* -------------------------------------------------------------- preview */
+.pv{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+.pv>*{min-width:0}
+@media(min-width:720px){.pv{grid-template-columns:minmax(0,210px) minmax(0,1fr)}}
+.frame{aspect-ratio:9/16;max-width:100%;border-radius:14px;border:1px solid var(--line);position:relative;overflow:hidden;display:flex;align-items:flex-end;padding:14px}
+.frame .legend{position:relative;color:#fff;font-family:var(--display);font-size:15px;line-height:1.25;text-shadow:0 2px 12px rgba(0,0,0,.65)}
+.frame .scrim{position:absolute;inset:40% 0 0;background:linear-gradient(to bottom,transparent,rgba(0,0,0,.62))}
+.frame .mark{position:absolute;top:11px;left:13px;right:13px;font-family:var(--mono);font-size:9.5px;color:rgba(255,255,255,.82);display:flex;justify-content:space-between;gap:8px}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;font-size:12.5px;margin:0 0 14px}
+.kv dt{color:var(--fg-dim);font-family:var(--mono);font-size:11px;white-space:nowrap}
+.kv dd{margin:0;overflow-wrap:anywhere}
+.script{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px;margin:0 0 12px}
+.tl{display:flex;flex-direction:column;gap:5px;margin:0 0 12px}
+.tl div{display:flex;gap:10px;font-size:12px;align-items:baseline}
+.tl .t{font-family:var(--mono);font-size:10.5px;color:var(--brand-2);white-space:nowrap;min-width:74px}
+.hash{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.hash span{font-family:var(--mono);font-size:11px;color:#9fb0ff;background:#161d33;border:1px solid var(--line);border-radius:7px;padding:2px 7px}
+.url{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#0d2440;border:1px solid #1d3a5e;border-radius:10px;padding:9px 11px;margin-bottom:12px}
+.url code{font-family:var(--mono);font-size:12px;color:#a8d4ff;overflow-wrap:anywhere}
+#json{background:#070a12;border:1px solid var(--line);border-radius:10px;padding:11px;font-family:var(--mono);font-size:10.5px;color:#9fb0c9;max-height:230px;overflow:auto;margin:0;white-space:pre}
+.foot{margin-top:24px;text-align:center;color:var(--fg-dim);font-size:12px}
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>🎬 <em>Viral Video Orchestrator</em></h1>
+      <p class="sub" style="margin:4px 0 0">5 agentes · fila de trabalhos · piloto automático · Shorts 1080×1920</p>
+    </div>
+    <div class="badges">
+      <span class="badge" id="bDriver">fila: <b>demo</b></span>
+      <span class="badge" id="bConc">2 simultâneos · 3 tentativas</span>
+      <span class="badge" id="bAuto">🤖 —</span>
+    </div>
+  </header>
+
+  <div class="aviso">
+    <span><b>Demo rodando no navegador.</b> É o mesmo pipeline do sistema em Node.js — os 5 agentes, a fila com concorrência 2, retry, anti-repetição e o piloto automático — simulado aqui para você clicar sem instalar nada.</span>
+    <span class="mono">código: <a href="https://github.com/luisotaviozuge1-prog/lastro01/tree/claude/viral-video-orchestration-system-smtarv" target="_blank" rel="noopener">github → branch</a></span>
+  </div>
+
+  <div class="stack">
+
+    <section class="card">
+      <h2>Gerar vídeos</h2>
+      <div class="controls">
+        <select id="nicho" aria-label="Nicho"></select>
+        <button class="primary" id="b1">▶ Gerar 1 Vídeo</button>
+        <input type="number" id="qtd" value="10" min="1" max="30" aria-label="Quantidade">
+        <button class="bulk" id="bN">⚡ Gerar 10 Vídeos</button>
+        <button class="sm" id="bPostAll">📤 Postar prontos</button>
+        <button class="sm danger" id="bClear">🗑️ Limpar</button>
+        <button id="bAutoBtn">🤖 Piloto: ON</button>
+        <label class="switch"><input type="checkbox" id="fail"> simular falhas (30%)</label>
+      </div>
+      <p class="sub" style="margin:12px 0 0" id="melhorias"></p>
+      <p class="sub" style="margin:6px 0 0" id="autoInfo"></p>
+    </section>
+
+    <section class="stats" id="stats"></section>
+
+    <div class="cols">
+      <section class="card">
+        <h2>Fila de trabalhos <span class="badge" id="filaN" style="float:right">0</span></h2>
+        <div id="fila"></div>
+        <p class="sub mono" style="margin:11px 0 0" id="filaInfo"></p>
+      </section>
+
+      <section class="card">
+        <h2>Console do servidor</h2>
+        <div id="log" role="log" aria-live="off"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>Vídeos</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Título</th><th>Nicho</th><th>Status</th><th style="text-align:right">Ações</th></tr></thead>
+          <tbody id="videos"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Preview do vídeo <span class="mono" id="pvId" style="float:right"></span></h2>
+      <div class="pv" id="pv"></div>
+    </section>
+
+  </div>
+
+  <p class="foot">Clique em qualquer linha da tabela para ver o vídeo. Pare de mexer por 30s e o piloto automático assume (no sistema real: 5 min).</p>
+</div>
+
+<script>
+/* ===========================================================================
+   Motor do demo — porte fiel de agents.js + orchestrator.js + queue.js +
+   autopilot.js para o navegador. Mesmas regras, mesmos pesos, mesmas travas.
+   =========================================================================== */
+'use strict';
+
+const SPEED = 0.22;            // simulacao acelerada (no servidor: 1)
+const CONCURRENCY = 2;         // config.CONCURRENCY
+const MAX_ATTEMPTS = 3;        // config.MAX_ATTEMPTS
+const BACKOFF_MS = 1000;       // config.BACKOFF_MS
+const WPS = 2.6;               // palavras por segundo da narracao
+const MIN_DUR = 20, MAX_DUR = 30, CENAS = 4;
+const JANELA_ANTIREP = 10;     // anti-repeticao: ultimos N videos
+const LOTE = 12;               // topicos por lote de pesquisa
+const AUTO = { idleMs: 30000, checkMs: 1000, lote: 2, maxFila: 4, maxHora: 20 };
+
+const NICHOS = {
+  'gta6': { label:'GTA 6', emoji:'🎮', voz:'pt-BR-Hype-Male', tags:['#gta6','#gta','#rockstar','#shorts','#games'] },
+  'curiosidades-games': { label:'Curiosidades de Games', emoji:'🤯', voz:'pt-BR-Narrator-Female', tags:['#curiosidades','#games','#gamer','#shorts'] },
+  'dicas-gameplay': { label:'Dicas de Gameplay', emoji:'🕹️', voz:'pt-BR-Coach-Male', tags:['#dicas','#gameplay','#tutorial','#shorts'] },
+  'easter-eggs': { label:'Easter Eggs', emoji:'🥚', voz:'pt-BR-Mystery-Male', tags:['#easteregg','#segredos','#games','#shorts'] },
+};
+
+const BASE = {
+  'gta6': [
+    ['O trailer de GTA 6 bateu recorde no YouTube','o primeiro trailer passou de 90 milhões de views em 24 horas e virou o lançamento mais assistido da história do YouTube fora da música'],
+    ['Vice City está de volta','o mapa volta para a Leonida inspirada na Flórida, o maior mapa já feito pela Rockstar'],
+    ['A primeira protagonista mulher da série','Lucia é a primeira protagonista feminina jogável da série principal, e a dupla com Jason foi inspirada em Bonnie e Clyde'],
+    ['Dez anos de produção','a produção passou de uma década e o orçamento estimado faz de GTA 6 o jogo mais caro já produzido'],
+    ['A água de GTA 6 tem física própria','as ondas reagem ao vento e os barcos deixam rastro na água em tempo real, algo que nenhum GTA anterior tinha'],
+    ['NPCs com rotina de 24 horas','cada NPC tem uma rotina própria: trabalha, volta pra casa e reage ao seu histórico de crimes na região'],
+    ['O mapa muda com o tempo','lojas abrem e fecham, obras avançam e furacões mudam o cenário conforme o jogo avança'],
+    ['GTA 6 é o lançamento mais esperado da década','analistas apontam que o jogo pode vender mais de 40 milhões de cópias só no primeiro ano'],
+    ['O rádio de GTA 6 tem licenciamento recorde','a Rockstar negociou centenas de músicas e algumas faixas foram feitas exclusivamente para o jogo'],
+    ['Polícia com memória','a polícia agora lembra do seu rosto: se você for visto, os bloqueios aparecem antes de você chegar'],
+    ['A Rockstar escondeu pistas no próprio site','fãs acharam metadados e nomes de arquivo no site oficial que confirmaram locais do mapa meses antes do anúncio'],
+    ['Online desde o primeiro dia','o modo online foi pensado junto com a campanha, e não adicionado depois como no GTA 5'],
+  ],
+  'curiosidades-games': [
+    ['O cogumelo do Mario nasceu de um limite técnico','o Mario ficou grande com o cogumelo porque o NES não tinha memória para dois personagens diferentes'],
+    ['As nuvens e os arbustos do Mario são iguais','os arbustos de Super Mario Bros são as mesmas nuvens pintadas de verde, para economizar memória do cartucho'],
+    ['Pac-Man foi inspirado numa pizza','o criador Toru Iwatani tirou a ideia do formato de uma pizza com uma fatia faltando'],
+    ['O nome Sonic quase foi outro','o mascote da Sega quase se chamou Mr. Needlemouse antes de virar Sonic the Hedgehog'],
+    ['Minecraft foi feito em uma semana','a primeira versão jogável foi programada por Notch em cerca de 6 dias em 2009'],
+    ['O Konami Code tem quase 40 anos','cima cima baixo baixo esquerda direita esquerda direita B A foi criado porque o programador não conseguia terminar o próprio jogo'],
+    ['Tetris foi feito em um computador soviético','Alexey Pajitnov criou Tetris em 1984 num Electronika 60, que nem tinha gráficos: as peças eram feitas de parênteses'],
+    ['O primeiro easter egg virou protesto','o programador de Adventure escondeu o próprio nome no jogo porque a Atari não dava crédito aos desenvolvedores'],
+    ['A trilha de Halo foi gravada em 3 dias','o tema com os monges foi composto e gravado em menos de uma semana e virou uma das trilhas mais reconhecidas dos games'],
+    ['Street Fighter 2 criou o combo por acidente','o sistema de combos era um bug de cancelamento de animação que os jogadores descobriram e a Capcom decidiu manter'],
+    ['O silêncio de Gordon Freeman é proposital','o protagonista de Half-Life nunca fala para que o jogador sinta que é ele mesmo dentro de Black Mesa'],
+    ['Doom roda em praticamente tudo','Doom de 1993 já foi rodado em calculadoras, caixas eletrônicos, geladeiras e até em testes de gravidez modificados'],
+  ],
+  'dicas-gameplay': [
+    ['Baixe a sensibilidade para acertar mais','a maioria dos jogadores de FPS usa sensibilidade alta demais; baixar 20% melhora o controle de recuo em poucos dias de treino'],
+    ['Use som antes da mira','em jogos competitivos o áudio entrega a posição do inimigo antes do visual, então fone fechado vale mais que mouse caro'],
+    ['Treine 10 minutos antes de jogar ranqueada','aquecer a mira por 10 minutos aumenta a precisão média na primeira partida de forma mensurável'],
+    ['Fique no centro do mapa','controlar o centro do mapa dá mais rotas de fuga e reduz a chance de ser pego por trás'],
+    ['Recarregue andando','quase todo shooter moderno permite recarregar em movimento; parar para recarregar é o erro mais comum de quem está subindo de rank'],
+    ['Jogue com FOV maior','aumentar o campo de visão mostra inimigos pela periferia da tela e reduz emboscadas laterais'],
+    ['Desligue o motion blur','tirar o motion blur deixa a imagem mais nítida em movimento e ajuda a rastrear alvos rápidos'],
+    ['Aprenda um mapa por semana','focar em um mapa por vez dá resultado mais rápido do que tentar decorar todos ao mesmo tempo'],
+    ['Use o minimapa a cada 5 segundos','olhar o minimapa com frequência é o hábito que mais separa jogador mediano de jogador bom'],
+    ['Não lute com desvantagem de número','recuar em 1 contra 2 é matematicamente melhor que trocar tiro: você perde o round, não a partida'],
+    ['Configure o FPS acima do refresh','manter o FPS estável acima da taxa do monitor reduz o input lag percebido mesmo sem monitor gamer'],
+    ['Grave suas partidas','rever 10 minutos da sua própria gameplay encontra mais erros do que assistir horas de profissional'],
+  ],
+  'easter-eggs': [
+    ['O fantasma do Monte Chiliad','em GTA 5 existe o fantasma de Jolene Cranley-Evans que aparece no Monte Chiliad entre 23h e meia-noite'],
+    ['A sala secreta do Skyrim','existe uma sala de desenvolvedor em Skyrim com todos os itens do jogo, acessível só por comando de console'],
+    ['Os documentos escondidos de Resident Evil','a mansão de Resident Evil esconde documentos que só aparecem no modo difícil e mudam a leitura da história'],
+    ['Os atalhos impossíveis de Mario Kart','em vários Mario Kart existem atalhos que só funcionam com cogumelo no momento exato, usados por speedrunners'],
+    ['O alien congelado de GTA 5','sob o gelo no norte do mapa de GTA 5 existe um alienígena congelado que só aparece no prólogo do jogo'],
+    ['A mensagem escondida no Portal','os rádios de Portal, se levados para pontos específicos, tocam sinais que viraram a pista do anúncio de Portal 2'],
+    ['As referências a GTA em Red Dead','há vários locais em Red Dead Redemption 2 com referências a GTA, incluindo nomes de ruas e marcas'],
+    ['As piadas internas do Minecraft','a tela de carregamento do Minecraft mostra frases aleatórias, e algumas são piadas internas dos desenvolvedores desde 2009'],
+    ['Os quartos numerados do Hitman','vários mapas de Hitman escondem referências a jogos antigos da série em números de quarto e placas'],
+    ['O código morse de Battlefield','Battlefield 4 esconde um código morse numa ilha que destravou um easter egg coletivo da comunidade'],
+    ['As homenagens de Elden Ring','áreas de Elden Ring guardam homenagens e itens que fazem referência direta a Dark Souls'],
+    ['O cachorro jogável de Duck Hunt','o cachorro de Duck Hunt é jogável no modo 2 jogadores: o segundo controle move o cachorro'],
+  ],
+};
+
+const HOOKS = ['Você não vai acreditar nisso:','Ninguém comenta sobre isso, mas','Isso aqui mudou tudo:','Aposto que você não sabia:','Para tudo, porque','Esse detalhe passou batido:'];
+const PONTES = ['E tem mais:','O detalhe é esse:','E olha o motivo:','Agora presta atenção:'];
+const CTAS = ['Segue aqui que tem mais todo dia.','Comenta se você já sabia dessa.','Salva esse vídeo pra não esquecer.','Manda pra aquele amigo que joga.'];
+const ANGULOS = ['o que ninguém te contou','a parte 2 da história','o detalhe que passou batido','por que isso ainda importa'];
+const PALETAS = [['#ff006e','#8338ec'],['#06ffa5','#0b7285'],['#ffbe0b','#fb5607'],['#3a86ff','#023047'],['#f72585','#4361ee']];
+const TRANSICOES = ['fade','slide-up','zoom-in','whip-pan'];
+
+/* ------------------------------------------------------------- utilidades */
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const trabalhar = (a, b) => sleep((a + Math.random() * (b - a)) * SPEED);
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+const palavras = (t) => t.trim().split(/\s+/).filter(Boolean).length;
+const dur = (t) => +(palavras(t) / WPS).toFixed(1);
+const slug = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'').slice(0,60);
+const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const hhmmss = () => new Date().toTimeString().slice(0, 8);
+
+/* ------------------------------------------------------------------ estado */
+const state = { videos: [], apiEconomizadas: 0, seq: 0, sel: null };
+const lotes = new Map();   // nicho -> { topicos, consumidos }
+const fila = { pendentes: [], ativos: new Map(), atrasados: 0, concluidos: 0, falhados: 0, n: 0 };
+const auto = { ativo: true, ultimaAtividade: Date.now(), gerados: 0, historico: [], ultimoHeartbeat: 0 };
+let failRate = 0;
+
+/* --------------------------------------------------------------- console */
+function log(msg, classe) {
+  const el = document.createElement('div');
+  if (classe) el.className = classe;
+  el.textContent = `${hhmmss()} ${msg}`;
+  const box = $('log');
+  box.appendChild(el);
+  while (box.childElementCount > 160) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ====================== 🔍 AGENT 1 — PESQUISA ============================ */
+async function agentPesquisa(ctx) {
+  log(`🔍 [${ctx.id}] Agent Pesquisa: buscando conteúdo viral...`);
+  if (Math.random() < failRate) throw new Error('[pesquisa] falha simulada');
+
+  let lote = lotes.get(ctx.nicho);
+  let doCache = false;
+  if (lote) {
+    // MELHORIA 5: lote reaproveitado -> economiza 1 chamada de API
+    doCache = true;
+    state.apiEconomizadas++;
+    log(`♻️ [${ctx.id}] lote reaproveitado do cache (economia de 1 chamada de API)`, 'l-ok');
+    await trabalhar(80, 200);
+  } else {
+    await trabalhar(500, 1100);
+    const topicos = BASE[ctx.nicho].map(([t, f]) => ({
+      id: slug(t), titulo: t, fato: f,
+      fonte: pick(['google-trends','reddit/r/gaming','youtube-trending','x-trending']),
+      score: +(6.5 + Math.random() * 3.5).toFixed(1),
+    })).sort((a, b) => b.score - a.score).slice(0, LOTE);
+    lote = { topicos, consumidos: 0 };
+    lotes.set(ctx.nicho, lote);
+    log(`🔍 [${ctx.id}] lote de ${topicos.length} tópicos buscado para "${ctx.nicho}" (1 chamada de API)`);
+  }
+
+  // MELHORIA 4: anti-repeticao na janela dos ultimos 10 videos do nicho
+  const recentes = state.videos.filter((v) => v.status !== 'failed' && v.nicho === ctx.nicho)
+    .slice(0, JANELA_ANTIREP).map((v) => v.topicoId).filter(Boolean);
+  const livres = lote.topicos.filter((t) => !recentes.includes(t.id));
+
+  let topico, angulo = null;
+  if (livres.length) {
+    topico = livres[0];
+    if (recentes.length) log(`🚫 [${ctx.id}] anti-repetição: ${recentes.length} tópico(s) recente(s) ignorado(s)`, 'l-warn');
+  } else {
+    topico = lote.topicos[lote.consumidos % lote.topicos.length];
+    angulo = ANGULOS[Math.floor(lote.consumidos / lote.topicos.length) % ANGULOS.length];
+    log(`♻️ [${ctx.id}] tópicos esgotados, gerando ângulo novo: "${angulo}"`, 'l-warn');
+  }
+  lote.consumidos++;
+
+  const pesquisa = {
+    topicoId: angulo ? `${topico.id}-${slug(angulo)}` : topico.id,
+    titulo: angulo ? `${topico.titulo} — ${angulo}` : topico.titulo,
+    fato: topico.fato, fonte: topico.fonte, score: topico.score, doCache: doCache,
+  };
+  log(`✅ [${ctx.id}] tópico escolhido: "${pesquisa.titulo}" (score ${pesquisa.score})`, 'l-ok');
+  return pesquisa;
+}
+
+/* ====================== ✍️ AGENT 2 — ROTEIRO ============================= */
+async function agentRoteiro(ctx) {
+  log(`✍️ [${ctx.id}] Agent Roteiro: escrevendo script de 20-30s...`);
+  if (Math.random() < failRate) throw new Error('[roteiro] falha simulada');
+  await trabalhar(400, 900);
+
+  const n = NICHOS[ctx.nicho], p = ctx.pesquisa;
+  const hook = pick(HOOKS), cta = pick(CTAS);
+  let texto = [
+    `${hook} ${p.titulo}.`,
+    `${p.fato[0].toUpperCase()}${p.fato.slice(1)}.`,
+    `${pick(PONTES)} isso é exatamente o tipo de detalhe que separa quem joga de quem entende de ${n.label.toLowerCase()}.`,
+    cta,
+  ].join(' ');
+
+  let d = dur(texto);
+  if (d > MAX_DUR) {
+    texto = texto.split(/\s+/).slice(0, Math.floor(MAX_DUR * WPS)).join(' ').replace(/[,;:]$/, '') + '.';
+    d = dur(texto);
+    log(`✂️ [${ctx.id}] script cortado para caber em ${MAX_DUR}s`, 'l-warn');
+  } else if (d < MIN_DUR) {
+    texto += ` ${pick(['O jogo nunca mais foi o mesmo depois disso.','Poucos reparam nisso até alguém mostrar.','E isso é só a ponta do iceberg.'])} ${pick(CTAS)}`;
+    d = dur(texto);
+    log(`➕ [${ctx.id}] script esticado para passar de ${MIN_DUR}s`, 'l-warn');
+  }
+
+  const frases = texto.match(/[^.!?]+[.!?]+/g) || [texto];
+  const porCena = Math.ceil(frases.length / CENAS);
+  const cenas = [];
+  for (let i = 0; i < CENAS; i++) {
+    const trecho = frases.slice(i * porCena, (i + 1) * porCena).join(' ').trim();
+    if (!trecho) break;
+    cenas.push({ i: cenas.length + 1, texto: trecho, dur: dur(trecho) });
+  }
+
+  const roteiro = { titulo: `${n.emoji} ${p.titulo}`, hook, cta, texto, cenas, palavras: palavras(texto), dur: d, tags: n.tags };
+  log(`✅ [${ctx.id}] script pronto: ${roteiro.palavras} palavras / ~${d}s / ${cenas.length} cenas`, 'l-ok');
+  return roteiro;
+}
+
+/* ====================== 🎙️ AGENT 3 — ÁUDIO =============================== */
+async function agentAudio(ctx) {
+  log(`🎙️ [${ctx.id}] Agent Áudio: gerando narração...`);
+  if (Math.random() < failRate) throw new Error('[audio] falha simulada');
+  await trabalhar(900, 1800);
+  const voz = NICHOS[ctx.nicho].voz;
+  log(`✅ [${ctx.id}] narração gerada (${voz}, ${ctx.roteiro.dur}s)`, 'l-ok');
+  return { voz, dur: ctx.roteiro.dur, formato: 'mp3', bitrate: '128kbps', sampleRate: 44100 };
+}
+
+/* ====================== 🎨 AGENT 4 — IMAGENS ============================= */
+async function agentImagens(ctx) {
+  log(`🎨 [${ctx.id}] Agent Imagens: criando visuais 1080x1920...`);
+  if (Math.random() < failRate) throw new Error('[imagens] falha simulada');
+  const cores = pick(PALETAS), imgs = [];
+  for (const cena of ctx.roteiro.cenas) {
+    await trabalhar(350, 700);
+    imgs.push({ cena: cena.i, cores, largura: 1080, altura: 1920,
+      origem: Math.random() > 0.5 ? 'gerada (IA)' : 'banco de imagens' });
+    log(`🖼️ [${ctx.id}] imagem ${cena.i}/${ctx.roteiro.cenas.length} pronta`);
+  }
+  log(`✅ [${ctx.id}] ${imgs.length} imagens prontas`, 'l-ok');
+  return imgs;
+}
+
+/* ====================== 🎬 AGENT 5 — EDIÇÃO ============================== */
+async function agentEdicao(ctx) {
+  log(`🎬 [${ctx.id}] Agent Edição: montando vídeo final...`);
+  if (Math.random() < failRate) throw new Error('[edicao] falha simulada');
+  await trabalhar(1200, 2400);
+
+  let cursor = 0;
+  const timeline = ctx.roteiro.cenas.map((cena, i) => {
+    const t = { cena: cena.i, inicio: +cursor.toFixed(1), fim: +(cursor + cena.dur).toFixed(1),
+      legenda: cena.texto, transicao: pick(TRANSICOES), imagem: `cena-${cena.i}.svg` };
+    cursor += cena.dur;
+    return t;
+  });
+
+  const arquivo = `${slug(ctx.roteiro.titulo) || 'video'}-${ctx.id.slice(-6)}.mp4`;
+  log(`✅ [${ctx.id}] vídeo montado: ${arquivo} (${cursor.toFixed(1)}s, 1080x1920)`, 'l-ok');
+  return { arquivo, timeline, duracao: +cursor.toFixed(1) || ctx.roteiro.dur, resolucao: '1080x1920', fps: 30 };
+}
+
+/* ================= PIPELINE (orchestrator.js) ============================ */
+const PESOS = { pesquisa: 15, roteiro: 20, midia: 40, edicao: 25 };
+
+async function processVideo(v) {
+  const t0 = Date.now();
+  const ctx = { id: v.id, nicho: v.nicho };
+  let prog = 0;
+  const avancar = (peso, etapa) => { prog = Math.min(100, prog + peso); v.progresso = Math.round(prog); v.etapa = etapa; render(); };
+
+  v.status = 'processing'; v.etapa = 'pesquisa'; v.progresso = 0; render();
+
+  ctx.pesquisa = await agentPesquisa(ctx);
+  v.topico = ctx.pesquisa.titulo; v.topicoId = ctx.pesquisa.topicoId; v.score = ctx.pesquisa.score;
+  avancar(PESOS.pesquisa, 'pesquisa');
+
+  ctx.roteiro = await agentRoteiro(ctx);
+  v.titulo = ctx.roteiro.titulo; v.script = ctx.roteiro.texto; v.tags = ctx.roteiro.tags; v.duracao = ctx.roteiro.dur;
+  avancar(PESOS.roteiro, 'roteiro');
+
+  // MELHORIA 1: áudio e imagens ao mesmo tempo
+  log(`⚡ [${v.id}] rodando Áudio + Imagens em PARALELO`, 'l-head');
+  const tm = Date.now();
+  v.etapa = 'áudio+imagens'; render();
+  const [audio, imagens] = await Promise.all([agentAudio(ctx), agentImagens(ctx)]);
+  log(`⚡ [${v.id}] mídia pronta em ${Date.now() - tm}ms (paralelo)`, 'l-head');
+  ctx.audio = audio; ctx.imagens = imagens;
+  avancar(PESOS.midia, 'áudio+imagens');
+
+  const video = await agentEdicao(ctx);
+  Object.assign(v, {
+    status: 'ready', progresso: 100, etapa: 'pronto', erro: null,
+    duracao: video.duracao, resolucao: video.resolucao, fps: video.fps,
+    arquivo: video.arquivo, timeline: video.timeline, cenas: ctx.roteiro.cenas,
+    cores: imagens[0].cores, audio, imagens, pesquisa: ctx.pesquisa,
+    tempoGeracao: Date.now() - t0,
+  });
+  log(`🧹 [${v.id}] arquivos temporários removidos`);
+  log(`🎉 [${v.id}] PRONTO em ${(v.tempoGeracao / 1000).toFixed(1)}s — ${v.titulo}`, 'l-head');
+  if (!state.sel) selecionar(v.id);
+  render();
+}
+
+/* ================= FILA (queue.js — driver memória) ====================== */
+function enfileirar(nicho, origem = 'manual') {
+  const id = `vid_${(Date.now()).toString(36)}${(state.seq++).toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const v = { id, jobId: `m${++fila.n}`, nicho, origem, status: 'queued', etapa: 'na fila',
+    progresso: 0, tentativas: 0, titulo: null, criadoEm: Date.now() };
+  state.videos.unshift(v);
+  fila.pendentes.push({ v, tentativas: 0 });
+  log(`➕ enfileirado: video ${id} (job ${v.jobId}, nicho ${nicho}${origem === 'auto' ? ', 🤖 automático' : ''})`);
+  setTimeout(tick, 0);
+  render();
+  return v;
+}
+
+function tick() {
+  while (fila.ativos.size < CONCURRENCY && fila.pendentes.length) {
+    const job = fila.pendentes.shift();
+    fila.ativos.set(job.v.id, job);
+    executar(job);
+  }
+}
+
+async function executar(job) {
+  const v = job.v;
+  try {
+    job.tentativas++;
+    v.tentativas = job.tentativas;
+    log(`▶️ job ${v.jobId} | video ${v.id} | nicho ${v.nicho} | tentativa ${job.tentativas}/${MAX_ATTEMPTS}`, 'l-head');
+    await processVideo(v);
+    fila.concluidos++;
+  } catch (err) {
+    log(`❌ [${v.id}] erro no pipeline: ${err.message}`, 'l-bad');
+    log(`🧹 [${v.id}] arquivos temporários removidos`);
+    if (job.tentativas < MAX_ATTEMPTS) {
+      // MELHORIA 2: retry com backoff exponencial
+      const espera = BACKOFF_MS * Math.pow(2, job.tentativas - 1) * SPEED;
+      Object.assign(v, { status: 'queued', progresso: 0, etapa: `retry em ${Math.round(espera / 1000 / SPEED)}s`, erro: err.message });
+      log(`🔁 video ${v.id}: tentativa ${job.tentativas} falhou, tentando de novo em ${Math.round(espera)}ms`, 'l-warn');
+      fila.atrasados++;
+      setTimeout(() => { fila.atrasados--; fila.pendentes.push(job); tick(); }, espera);
+    } else {
+      fila.falhados++;
+      Object.assign(v, { status: 'failed', etapa: 'falhou', erro: err.message });
+      log(`💀 video ${v.id} falhou depois de ${MAX_ATTEMPTS} tentativas: ${err.message}`, 'l-bad');
+    }
+  } finally {
+    fila.ativos.delete(v.id);
+    render();
+    tick();
+  }
+}
+
+/* ================= PILOTO AUTOMÁTICO (autopilot.js) ===================== */
+let nichoRodando = 0;
+function atividade() { auto.ultimaAtividade = Date.now(); }
+['click', 'keydown', 'touchstart', 'pointerdown'].forEach((ev) =>
+  document.addEventListener(ev, atividade, { passive: true }));
+
+function cicloAuto() {
+  const inativo = Date.now() - auto.ultimaAtividade;
+  if (auto.ativo && inativo >= AUTO.idleMs) {
+    // heartbeat: prova no console de que continua ligado
+    if (Date.now() - auto.ultimoHeartbeat > 15000) {
+      auto.ultimoHeartbeat = Date.now();
+      log(`💓 ligado · inativo há ${Math.round(inativo / 1000)}s · piloto automático LIGADO · ${auto.gerados} vídeo(s) gerado(s) sozinho`, 'l-auto');
+    }
+    auto.historico = auto.historico.filter((t) => t > Date.now() - 3600000);
+    const pendentes = fila.pendentes.length + fila.ativos.size + fila.atrasados;
+    if (auto.historico.length < AUTO.maxHora && pendentes < AUTO.maxFila) {
+      const quantos = Math.max(0, Math.min(AUTO.lote, AUTO.maxFila - pendentes, AUTO.maxHora - auto.historico.length));
+      if (quantos) {
+        log(`🤖 PILOTO AUTOMÁTICO: ${Math.round(inativo / 1000)}s sem ninguém mexer — gerando ${quantos} vídeo(s) sozinho`, 'l-auto');
+        const lista = Object.keys(NICHOS);
+        for (let i = 0; i < quantos; i++) {
+          enfileirar(lista[nichoRodando++ % lista.length], 'auto');
+          auto.historico.push(Date.now());
+          auto.gerados++;
+        }
+      }
+    }
+  }
+  render();
+}
+
+/* ============================= AÇÕES ==================================== */
+$('b1').onclick = () => { const v = enfileirar($('nicho').value); toast(`✅ vídeo enfileirado: ${v.id}`); };
+$('bN').onclick = () => {
+  const q = Math.max(1, Math.min(Number($('qtd').value) || 10, 30));
+  for (let i = 0; i < q; i++) enfileirar($('nicho').value);
+  log(`📦 lote de ${q} vídeo(s) na fila (nicho ${$('nicho').value})`, 'l-head');
+  toast(`⚡ ${q} vídeos na fila`);
+};
+$('qtd').oninput = () => { $('bN').textContent = `⚡ Gerar ${$('qtd').value || 1} Vídeos`; };
+$('bPostAll').onclick = () => {
+  const prontos = state.videos.filter((v) => v.status === 'ready');
+  if (!prontos.length) return toast('nenhum vídeo pronto para postar');
+  prontos.forEach(postar);
+  toast(`📤 ${prontos.length} vídeo(s) postado(s)`);
+};
+let confirmar = null;
+$('bClear').onclick = () => {
+  if (confirmar !== 'clear') {
+    confirmar = 'clear';
+    $('bClear').textContent = '🗑️ clique de novo p/ confirmar';
+    setTimeout(() => { confirmar = null; $('bClear').textContent = '🗑️ Limpar'; }, 4000);
+    return;
+  }
+  confirmar = null; $('bClear').textContent = '🗑️ Limpar';
+  const n = state.videos.length;
+  state.videos = []; state.sel = null; lotes.clear();
+  fila.pendentes = []; fila.concluidos = 0; fila.falhados = 0;
+  state.apiEconomizadas = 0; auto.gerados = 0; auto.historico = [];
+  log(`🗑️ ${n} registro(s) removido(s) (trabalhos em andamento são descartados)`, 'l-warn');
+  render();
+};
+$('bAutoBtn').onclick = () => {
+  auto.ativo = !auto.ativo;
+  log(`🤖 piloto automático ${auto.ativo ? 'LIGADO' : 'DESLIGADO'} pelo usuário`, 'l-auto');
+  toast(auto.ativo ? '🤖 piloto automático LIGADO' : '🤖 piloto automático desligado');
+  render();
+};
+$('fail').onchange = (e) => {
+  failRate = e.target.checked ? 0.3 : 0;
+  log(`⚙️ taxa de falha simulada: ${Math.round(failRate * 100)}% por agente${failRate ? ' — veja o retry automático em ação' : ''}`, 'l-warn');
+};
+
+function postar(v) {
+  if (v.status !== 'ready') return;
+  const id = Math.random().toString(36).slice(2, 10);
+  v.status = 'posted'; v.etapa = 'postado';
+  v.youtube = { id, url: `https://youtube.com/shorts/${id}`, canal: 'Viral Shorts BR', postadoEm: new Date().toISOString() };
+  log(`📤 [${v.id}] publicado: ${v.youtube.url}`, 'l-ok');
+  render();
+}
+
+function selecionar(id) { state.sel = id; render(); }
+
+function toast(msg) { log(msg, 'l-ok'); }
+
+async function copiar(texto, botao) {
+  try {
+    await navigator.clipboard.writeText(texto);
+    const antes = botao.textContent;
+    botao.textContent = '✓ copiado';
+    setTimeout(() => { botao.textContent = antes; }, 1600);
+  } catch {
+    // Clipboard negado: seleciona o texto para o usuário copiar na mão
+    const alvo = botao.previousElementSibling;
+    if (alvo) { const r = document.createRange(); r.selectNodeContents(alvo); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+    botao.textContent = 'selecionado — copie';
+  }
+}
+
+/* ============================= RENDER =================================== */
+function tempoHumano(seg) {
+  if (seg < 60) return `${seg}s`;
+  const m = Math.floor(seg / 60);
+  return m < 60 ? `${m}min` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`;
+}
+
+function render() {
+  const v = state.videos;
+  const s = {
+    total: v.length,
+    queued: v.filter((x) => x.status === 'queued').length,
+    processing: v.filter((x) => x.status === 'processing').length,
+    ready: v.filter((x) => x.status === 'ready').length,
+    posted: v.filter((x) => x.status === 'posted').length,
+    failed: v.filter((x) => x.status === 'failed').length,
+  };
+  const comTempo = v.filter((x) => x.tempoGeracao);
+  const medio = comTempo.length ? (comTempo.reduce((a, x) => a + x.tempoGeracao, 0) / comTempo.length / 1000) : null;
+
+  $('stats').innerHTML = [
+    ['brand', s.total, 'gerados'], ['', s.queued, 'na fila'], ['warn', s.processing, 'processando'],
+    ['ok', s.ready, 'prontos'], ['info', s.posted, 'postados'], ['bad', s.failed, 'falhas'],
+    ['', medio ? medio.toFixed(1) + 's' : '—', 'tempo médio'], ['brand', state.apiEconomizadas, 'api economizada'],
+  ].map(([c, n, r]) => `<div class="stat ${c}"><b>${n}</b><span>${r}</span></div>`).join('');
+
+  // fila
+  const jobs = v.filter((x) => x.status === 'queued' || x.status === 'processing')
+    .sort((a, b) => (b.status === 'processing') - (a.status === 'processing'));
+  $('filaN').textContent = jobs.length;
+  $('fila').innerHTML = jobs.length ? jobs.map((j) => `
+    <div class="job">
+      <div class="l1">
+        <strong>${j.status === 'processing' ? '⏳' : '🕒'} ${esc(j.topico || NICHOS[j.nicho].label)}${j.origem === 'auto' ? '<span class="tag auto">🤖 AUTO</span>' : ''}</strong>
+        <span class="mono">${j.id.slice(-8)}</span>
+      </div>
+      <div class="bar ${j.tentativas > 1 ? 'retry' : ''}"><i style="width:${j.progresso}%"></i></div>
+      <div class="l2"><span>${esc(j.etapa)} · ${j.progresso}%</span><span>tentativa ${j.tentativas}/${MAX_ATTEMPTS}</span></div>
+      ${j.erro && j.status === 'queued' ? `<div class="l2" style="color:var(--bad)">⚠️ ${esc(j.erro)}</div>` : ''}
+    </div>`).join('') : '<div class="empty">Fila vazia — clique em "Gerar 1 Vídeo" ou espere o piloto automático.</div>';
+  $('filaInfo').textContent = `aguardando ${fila.pendentes.length} · ativos ${fila.ativos.size} · retry ${fila.atrasados} · concluídos ${fila.concluidos} · falhas ${fila.falhados}`;
+
+  // tabela
+  $('videos').innerHTML = v.length ? v.slice(0, 60).map((x) => {
+    const acts = [];
+    if (x.status === 'ready') acts.push(`<button class="sm post" data-post="${x.id}">📤 POSTAR</button>`);
+    if (x.status === 'ready' || x.status === 'posted') acts.push(`<button class="sm" data-ver="${x.id}">👁 ver</button>`);
+    if (x.status === 'queued' || x.status === 'processing') acts.push(`<span class="mono">${x.progresso}%</span>`);
+    const tag = x.origem === 'auto' ? '<span class="tag auto">🤖 AUTO</span>'
+      : x.origem === 'exemplo' ? '<span class="tag ex">EXEMPLO</span>' : '';
+    const det = x.status === 'failed'
+      ? `<small style="color:var(--bad)">${esc(x.erro)}</small>`
+      : `<small>${x.id.slice(-8)}${x.duracao ? ' · ' + x.duracao + 's' : ''}${x.tempoGeracao ? ' · gerado em ' + (x.tempoGeracao / 1000).toFixed(1) + 's' : ''}</small>`;
+    return `<tr class="${state.sel === x.id ? 'sel ' : ''}${x.timeline ? 'clickable' : ''}" data-row="${x.id}">
+      <td class="tit">${esc(x.titulo || '(gerando...)')}${tag}${det}</td>
+      <td class="mono">${esc(x.nicho)}</td>
+      <td><span class="pill ${x.status}">${x.status}</span></td>
+      <td><div class="acts">${acts.join('')}</div></td></tr>`;
+  }).join('') : '<tr><td colspan="4" class="empty">Nenhum vídeo ainda.</td></tr>';
+
+  // piloto
+  const inativo = Math.round((Date.now() - auto.ultimaAtividade) / 1000);
+  const limite = AUTO.idleMs / 1000;
+  const emAcao = auto.ativo && inativo >= limite;
+  const b = $('bAuto');
+  b.className = 'badge' + (emAcao ? ' live' : (auto.ativo ? ' on' : ''));
+  b.innerHTML = auto.ativo
+    ? (emAcao ? `🤖 <b>gerando sozinho (${auto.gerados})</b>` : `🤖 piloto ON · assume em <b>${Math.max(0, limite - inativo)}s</b>`)
+    : '🤖 piloto OFF';
+  $('bAutoBtn').textContent = auto.ativo ? '🤖 Piloto: ON' : '🤖 Piloto: OFF';
+  $('bAutoBtn').className = auto.ativo ? 'auto-on' : '';
+  $('autoInfo').textContent = auto.ativo
+    ? `Piloto automático ligado: depois de ${tempoHumano(limite)} sem ninguém mexer (no sistema real: 5 min), gera ${AUTO.lote} vídeo(s) por ciclo — no máximo ${AUTO.maxFila} na fila e ${AUTO.maxHora}/hora. Já gerou ${auto.gerados} sozinho.`
+    : 'Piloto automático desligado — o sistema só gera quando você clicar.';
+
+  renderPreview();
+}
+
+function renderPreview() {
+  const v = state.videos.find((x) => x.id === state.sel && x.timeline);
+  $('pvId').textContent = v ? v.id : '';
+  if (!v) {
+    $('pv').innerHTML = '<div class="empty">Gere um vídeo e clique nele para ver o preview 9:16, o script e a timeline.</div>';
+    return;
+  }
+  const cena = v.cenas[0];
+  const manifesto = {
+    videoId: v.id, titulo: v.titulo, nicho: v.nicho, resolucao: v.resolucao, fps: v.fps,
+    duracao: v.duracao, audio: { voz: v.audio.voz, duracao: v.audio.dur, formato: v.audio.formato },
+    imagens: v.imagens.map((i) => `cena-${i.cena}.svg`), timeline: v.timeline,
+    hashtags: v.tags, script: v.script, pesquisa: v.pesquisa,
+  };
+  const json = JSON.stringify(manifesto, null, 2);
+
+  $('pv').innerHTML = `
+    <div>
+      <div class="frame" style="background:linear-gradient(140deg,${v.cores[0]},${v.cores[1]})">
+        <div class="scrim"></div>
+        <div class="mark"><span>${esc(v.resolucao)}</span><span>cena 1/${v.cenas.length}</span></div>
+        <div class="legend">${esc(cena.texto.slice(0, 120))}</div>
+      </div>
+      <p class="sub mono" style="margin:9px 0 0;text-align:center">${v.duracao}s · ${v.fps}fps · vertical</p>
+    </div>
+    <div style="min-width:0">
+      <dl class="kv">
+        <dt>arquivo</dt><dd class="mono">${esc(v.arquivo)}</dd>
+        <dt>tópico</dt><dd>${esc(v.pesquisa.titulo)} <span class="mono">(score ${v.pesquisa.score} · ${esc(v.pesquisa.fonte)})</span></dd>
+        <dt>narração</dt><dd>${esc(v.audio.voz)} · ${v.audio.bitrate} · ${v.audio.sampleRate}Hz</dd>
+        <dt>imagens</dt><dd>${v.imagens.map((i) => esc(i.origem)).join(', ')}</dd>
+      </dl>
+      ${v.youtube ? `<div class="url"><code>${esc(v.youtube.url)}</code><button class="sm" data-copy="url">copiar link</button></div>` : ''}
+      <p class="script">${esc(v.script)}</p>
+      <div class="hash">${v.tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>
+      <div class="tl">${v.timeline.map((t) => `<div><span class="t">${t.inicio.toFixed(1)}s → ${t.fim.toFixed(1)}s</span><span>${esc(t.legenda.slice(0, 90))} <span class="mono">(${esc(t.transicao)})</span></span></div>`).join('')}</div>
+      <pre id="json">${esc(json)}</pre>
+      <div style="margin-top:9px"><button class="sm" data-copy="json">copiar manifesto JSON</button></div>
+    </div>`;
+
+  $('pv').querySelectorAll('[data-copy]').forEach((b) => {
+    b.onclick = () => copiar(b.dataset.copy === 'json' ? json : v.youtube.url, b);
+  });
+}
+
+/* delegação de eventos da tabela (o HTML é reconstruído a cada render) */
+$('videos').addEventListener('click', (e) => {
+  const post = e.target.closest('[data-post]');
+  if (post) { postar(state.videos.find((x) => x.id === post.dataset.post)); return; }
+  const ver = e.target.closest('[data-ver]');
+  if (ver) { selecionar(ver.dataset.ver); return; }
+  const row = e.target.closest('[data-row]');
+  if (row) selecionar(row.dataset.row);
+});
+
+/* ============================== BOOT ==================================== */
+$('nicho').innerHTML = Object.entries(NICHOS)
+  .map(([id, n]) => `<option value="${id}">${n.emoji} ${n.label}</option>`).join('');
+$('melhorias').textContent = 'Melhorias ativas: 1) áudio+imagens em paralelo · 2) retry automático (3 tentativas) · 3) limpeza de temp · 4) anti-repetição (últimos 10) · 5) pesquisa em lote por nicho';
+
+log('🎬 Viral Video Orchestrator', 'l-head');
+log('🧵 fila: MEMÓRIA (demo no navegador) | concorrência 2 | 3 tentativas');
+log('🎞️ formato: 1080x1920 @ 30fps (20-30s)');
+log('🧩 nichos: ' + Object.keys(NICHOS).join(', '));
+log('🤖 piloto automático: LIGADO — assume depois de 30s sem ninguém mexer', 'l-auto');
+
+/* Abre num estado de trabalho realista: 3 exemplos já prontos + 1 postado. */
+(async () => {
+  const semear = ['gta6', 'easter-eggs', 'curiosidades-games', 'dicas-gameplay'];
+  const antes = SPEED;
+  for (const nicho of semear) {
+    const v = { id: `vid_ex${Math.random().toString(36).slice(2, 8)}`, jobId: `m0`, nicho,
+      origem: 'exemplo', status: 'queued', etapa: 'na fila', progresso: 0, tentativas: 1, criadoEm: Date.now() };
+    state.videos.push(v);
+    try { await processVideo(v); } catch { /* exemplos nao falham */ }
+  }
+  postar(state.videos[state.videos.length - 1]);
+  selecionar(state.videos[0].id);
+  log('— exemplos carregados. agora é com você: clique em "Gerar 10 Vídeos" —', 'l-head');
+  atividade();
+  render();
+})();
+
+setInterval(cicloAuto, AUTO.checkMs);
+render();
+</script>
