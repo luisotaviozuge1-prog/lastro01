@@ -1,0 +1,28 @@
+{
+  "name": "viral-video-orchestrator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema completo de orquestracao de videos virais (5 agentes + fila de trabalhos + dashboard web)",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "bullmq": "5.81.5",
+    "express": "4.22.3",
+    "ioredis": "5.9.0"
+  },
+  "keywords": [
+    "shorts",
+    "automation",
+    "bullmq",
+    "queue",
+    "agents"
+  ],
+  "license": "MIT"
+}

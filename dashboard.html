@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Viral Video Orchestrator</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#13161f; --panel2:#1a1e2a; --line:#262b38;
+    --txt:#e8ebf2; --muted:#8b93a7;
+    --pink:#ff2e88; --violet:#8b5cf6; --green:#1dd882; --amber:#ffb020; --red:#ff4d4d; --blue:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  a{color:var(--blue)}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 16px 60px}
+
+  header.top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:20px}
+  h1{font-size:24px;margin:0;letter-spacing:-.4px}
+  h1 span{background:linear-gradient(90deg,var(--pink),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);font-size:13px;margin-top:4px}
+  .badge{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+  .dot.off{background:var(--red)}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card h2{font-size:14px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:0 0 14px}
+
+  /* ------------------------------------------------------------ controles */
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:18px}
+  select,input[type=number]{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px}
+  button{cursor:pointer;border:0;border-radius:10px;padding:11px 16px;font-size:14px;font-weight:600;color:#fff;background:var(--panel2);border:1px solid var(--line);transition:.15s transform,.15s filter}
+  button:hover:not(:disabled){filter:brightness(1.15)}
+  button:active:not(:disabled){transform:translateY(1px)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.primary{background:linear-gradient(90deg,var(--pink),var(--violet));border:0}
+  button.bulk{background:linear-gradient(90deg,#f59e0b,#ef4444);border:0}
+  button.ghost{background:transparent}
+  button.sm{padding:7px 11px;font-size:12.5px}
+  button.post{background:var(--green);color:#06281a;border:0}
+  button.dl{background:var(--blue);border:0}
+
+  /* ---------------------------------------------------------------- stats */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:18px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  .stat b{display:block;font-size:28px;line-height:1.1;font-variant-numeric:tabular-nums}
+  .stat small{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+  .stat.green b{color:var(--green)} .stat.amber b{color:var(--amber)}
+  .stat.violet b{color:var(--violet)} .stat.red b{color:var(--red)} .stat.blue b{color:var(--blue)}
+
+  .grid{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:900px){.grid{grid-template-columns:minmax(0,1fr) minmax(0,1.25fr)}}
+
+  /* ----------------------------------------------------------------- fila */
+  .job{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+  .job .row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px}
+  .job .id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);font-size:11.5px}
+  .bar{height:8px;background:#0d1017;border-radius:999px;overflow:hidden;margin-top:9px}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--pink),var(--violet));transition:width .4s ease;border-radius:999px}
+  .job .etapa{color:var(--muted);font-size:12px;margin-top:6px;display:flex;justify-content:space-between;gap:8px}
+
+  /* --------------------------------------------------------------- videos */
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.7px;padding:0 8px 9px;font-weight:600}
+  td{padding:10px 8px;border-top:1px solid var(--line);vertical-align:middle}
+  .title{font-weight:600;max-width:330px}
+  .title small{display:block;color:var(--muted);font-weight:400;font-size:11.5px;font-family:ui-monospace,Menlo,monospace}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+  .pill.queued{background:#2b3245;color:#b9c3dd}
+  .pill.processing{background:#3a2a52;color:#d4b3ff}
+  .pill.ready{background:#0f3d2b;color:#5ef0a8}
+  .pill.posted{background:#113a5c;color:#7cc8ff}
+  .pill.failed{background:#4a1b1f;color:#ff9b9b}
+  .acoes{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .empty{color:var(--muted);text-align:center;padding:26px 0;font-size:13.5px}
+
+  #toast{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50}
+  .t{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--green);border-radius:10px;padding:11px 14px;font-size:13.5px;max-width:340px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+  .t.err{border-left-color:var(--red)}
+  footer{margin-top:22px;color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>🎬 <span>Viral Video Orchestrator</span></h1>
+      <div class="sub">5 agentes · fila de trabalhos · 1080x1920 vertical</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <span class="badge"><i class="dot" id="dot"></i><span id="driver">conectando...</span></span>
+      <span class="badge" id="conc">—</span>
+      <span class="badge" id="simBadge">—</span>
+    </div>
+  </header>
+
+  <!-- ------------------------------------------------------- controles -->
+  <div class="card" style="margin-bottom:18px">
+    <h2>Gerar videos</h2>
+    <div class="controls">
+      <select id="nicho" title="Nicho"></select>
+      <button class="primary" id="btn1">▶ Gerar 1 Video</button>
+      <input type="number" id="qtd" value="10" min="1" max="50" style="width:84px" title="Quantidade">
+      <button class="bulk" id="btnN">⚡ Gerar 10 Videos</button>
+      <button class="ghost sm" id="btnPostAll" title="Posta todos os videos prontos">📤 Postar todos os prontos</button>
+      <button class="ghost sm" id="btnClear" title="Apaga fila e historico">🗑️ Limpar tudo</button>
+    </div>
+    <div class="sub" id="melhorias">—</div>
+  </div>
+
+  <!-- ----------------------------------------------------------- stats -->
+  <div class="stats" id="stats"></div>
+
+  <div class="grid">
+    <!-- ---------------------------------------------------------- fila -->
+    <section class="card">
+      <h2>Fila de trabalhos <span id="filaCount" class="badge" style="float:right">0</span></h2>
+      <div id="fila"></div>
+      <div class="sub" id="filaInfo" style="margin-top:10px"></div>
+    </section>
+
+    <!-- -------------------------------------------------------- videos -->
+    <section class="card">
+      <h2>Videos</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Titulo</th><th>Nicho</th><th>Status</th><th style="text-align:right">Acoes</th></tr></thead>
+          <tbody id="videos"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <footer>Atualiza a cada 1,5s · <a href="/api/dashboard" target="_blank">/api/dashboard</a> · <a href="/api/health" target="_blank">/api/health</a></footer>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* =========================================================================
+   Dashboard — HTML + Fetch API puro (sem build, sem framework)
+   ========================================================================= */
+const $ = (id) => document.getElementById(id);
+let nichosCarregados = false;
+let ultimoErro = null;
+
+function toast(msg, erro = false) {
+  const el = document.createElement('div');
+  el.className = 't' + (erro ? ' err' : '');
+  el.textContent = msg;
+  $('toast').appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+async function api(metodo, url, body) {
+  const res = await fetch(url, {
+    method: metodo,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let dados = {};
+  try { dados = await res.json(); } catch { /* resposta sem JSON */ }
+  if (!res.ok || dados.ok === false) {
+    throw new Error(dados.erro || ('HTTP ' + res.status));
+  }
+  return dados;
+}
+
+/* --------------------------------------------------------------- acoes --- */
+$('btn1').onclick = async () => {
+  const b = $('btn1'); b.disabled = true;
+  try {
+    const r = await api('POST', '/api/generate-video?nicho=' + encodeURIComponent($('nicho').value));
+    toast('✅ video enfileirado: ' + r.videoId);
+    render();
+  } catch (e) { toast('❌ ' + e.message, true); }
+  finally { b.disabled = false; }
+};
+
+$('btnN').onclick = async () => {
+  const b = $('btnN'); b.disabled = true;
+  const qtd = Math.max(1, Number($('qtd').value) || 10);
+  try {
+    const r = await api('POST', `/api/generate-multiple?quantidade=${qtd}&nicho=${encodeURIComponent($('nicho').value)}`);
+    toast(`⚡ ${r.quantidade} videos na fila (lote ${r.lote})`);
+    render();
+  } catch (e) { toast('❌ ' + e.message, true); }
+  finally { b.disabled = false; }
+};
+
+$('qtd').oninput = () => { $('btnN').textContent = `⚡ Gerar ${$('qtd').value || 1} Videos`; };
+
+$('btnClear').onclick = async () => {
+  if (!confirm('Apagar a fila e todo o historico de videos?')) return;
+  try { const r = await api('DELETE', '/api/videos'); toast('🗑️ ' + r.mensagem); render(); }
+  catch (e) { toast('❌ ' + e.message, true); }
+};
+
+async function postar(id, botao) {
+  if (botao) { botao.disabled = true; botao.textContent = '...'; }
+  try {
+    const r = await api('POST', '/api/post-video', { id });
+    toast('📤 postado: ' + r.youtube.url);
+    render();
+  } catch (e) { toast('❌ ' + e.message, true); if (botao) { botao.disabled = false; botao.textContent = '📤 POSTAR'; } }
+}
+
+$('btnPostAll').onclick = async () => {
+  const b = $('btnPostAll'); b.disabled = true;
+  try {
+    const { videos } = await api('GET', '/api/videos?status=ready');
+    if (!videos.length) { toast('nenhum video pronto para postar'); return; }
+    for (const v of videos) {
+      try { await api('POST', '/api/post-video', { id: v.id }); } catch (e) { toast('❌ ' + e.message, true); }
+      render();
+    }
+    toast(`📤 ${videos.length} video(s) postado(s)`);
+  } catch (e) { toast('❌ ' + e.message, true); }
+  finally { b.disabled = false; }
+};
+
+/* -------------------------------------------------------------- render --- */
+function statCard(valor, rotulo, cor) {
+  return `<div class="stat ${cor || ''}"><b>${valor}</b><small>${rotulo}</small></div>`;
+}
+
+function render() {
+  return api('GET', '/api/dashboard').then((d) => {
+    ultimoErro = null;
+    $('dot').className = 'dot';
+    $('driver').textContent = 'fila: ' + (d.sistema.driverFila === 'bullmq' ? 'BullMQ + Redis' : 'memoria (sem Redis)');
+    $('conc').textContent = `⚙️ ${d.sistema.concorrencia} simultaneos · ${d.sistema.maxTentativas} tentativas`;
+    $('simBadge').textContent = d.sistema.simulacao ? '🧪 modo simulacao' : '🚀 modo real';
+
+    const m = d.sistema.melhorias;
+    $('melhorias').textContent =
+      `Melhorias ativas: ${m.PARALELO ? '1) audio+imagens em paralelo · ' : ''}${d.sistema.maxTentativas > 1 ? '2) retry automatico · ' : ''}` +
+      `${m.LIMPEZA_TEMP ? '3) limpeza de temp · ' : ''}${m.ANTI_REPETICAO ? `4) anti-repeticao (ultimos ${m.ANTI_REPETICAO_JANELA}) · ` : ''}` +
+      `${m.LOTE_PESQUISA ? `5) pesquisa em lote (economia: ${d.stats.apiCallsEconomizadas} chamadas)` : ''}`;
+
+    // nichos (uma vez)
+    if (!nichosCarregados) {
+      $('nicho').innerHTML = d.sistema.nichos
+        .map((n) => `<option value="${n.id}">${n.emoji} ${n.label}</option>`).join('');
+      nichosCarregados = true;
+    }
+
+    // stats
+    const s = d.stats;
+    $('stats').innerHTML = [
+      statCard(s.total, 'gerados', 'violet'),
+      statCard(s.naFila, 'na fila'),
+      statCard(s.processando, 'processando', 'amber'),
+      statCard(s.prontos, 'prontos', 'green'),
+      statCard(s.postados, 'postados', 'blue'),
+      statCard(s.falhados, 'falhas', 'red'),
+      statCard(s.tempoMedioSegundos ? s.tempoMedioSegundos + 's' : '—', 'tempo medio'),
+    ].join('');
+
+    // fila
+    const jobs = d.fila.trabalhos;
+    $('filaCount').textContent = jobs.length;
+    $('fila').innerHTML = jobs.length
+      ? jobs.map((j) => `
+        <div class="job">
+          <div class="row">
+            <strong>${j.status === 'processing' ? '⏳' : '🕒'} ${escapeHtml(j.topico || j.nicho)}</strong>
+            <span class="id">${j.id}</span>
+          </div>
+          <div class="bar"><i style="width:${j.progresso || 0}%"></i></div>
+          <div class="etapa">
+            <span>${escapeHtml(j.etapa || '-')} · ${j.progresso || 0}%</span>
+            <span>tentativa ${j.tentativas || 0}/${j.maxTentativas}</span>
+          </div>
+          ${j.erro ? `<div class="etapa" style="color:var(--red)">⚠️ ${escapeHtml(j.erro)}</div>` : ''}
+        </div>`).join('')
+      : '<div class="empty">Fila vazia — clique em "Gerar 1 Video" ou "Gerar 10 Videos".</div>';
+
+    const c = d.fila.contadores;
+    $('filaInfo').textContent = `aguardando ${c.waiting} · ativos ${c.active} · retry ${c.delayed} · concluidos ${c.completed} · falhas ${c.failed}`;
+
+    // videos
+    $('videos').innerHTML = d.videos.length
+      ? d.videos.map(linhaVideo).join('')
+      : '<tr><td colspan="4" class="empty">Nenhum video ainda.</td></tr>';
+  }).catch((e) => {
+    if (ultimoErro !== e.message) { toast('❌ dashboard: ' + e.message, true); ultimoErro = e.message; }
+    $('dot').className = 'dot off';
+    $('driver').textContent = 'servidor offline';
+  });
+}
+
+function linhaVideo(v) {
+  const acoes = [];
+  if (v.status === 'ready') {
+    acoes.push(`<button class="sm post" onclick="postar('${v.id}', this)">📤 POSTAR</button>`);
+  }
+  if (v.status === 'posted' && v.youtube) {
+    acoes.push(`<a href="${v.youtube.url}" target="_blank"><button class="sm ghost">▶ ver</button></a>`);
+  }
+  if (v.temArquivo) {
+    acoes.push(`<a href="/api/download/${v.id}"><button class="sm dl">⬇ baixar</button></a>`);
+    acoes.push(`<a href="/api/download/${v.id}/manifest"><button class="sm ghost">{ } json</button></a>`);
+  }
+  if (v.status === 'processing' || v.status === 'queued') {
+    acoes.push(`<span class="id">${v.progresso || 0}%</span>`);
+  }
+
+  const detalhe = v.status === 'failed'
+    ? `<small style="color:var(--red)">${escapeHtml(v.erro || 'falhou')}</small>`
+    : `<small>${v.id}${v.duracao ? ' · ' + v.duracao + 's' : ''}${v.tempoGeracaoSegundos ? ' · gerado em ' + v.tempoGeracaoSegundos + 's' : ''}</small>`;
+
+  return `<tr>
+    <td class="title">${escapeHtml(v.titulo)}${detalhe}</td>
+    <td>${escapeHtml(v.nicho)}</td>
+    <td><span class="pill ${v.status}">${v.status}</span></td>
+    <td><div class="acoes">${acoes.join('')}</div></td>
+  </tr>`;
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* Polling: 1,5s — leve o suficiente para 10+ videos ao mesmo tempo. */
+render();
+setInterval(render, 1500);
+</script>
+</body>
+</html>
