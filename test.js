@@ -452,6 +452,29 @@ async function main() {
     { env: { ...process.env, DATA_DIR: dirNovo }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   ok(saidaNova.trim() === 'ok', 'primeira execucao carrega em silencio (sem erro falso)');
 
+  // -------------------- 12) FILA INDISPONIVEL (Redis fora do ar)
+  console.log('\n12) FILA INDISPONIVEL — o dashboard nao pode congelar junto');
+
+  // comPrazo e o que impede a API de pendurar: com maxRetriesPerRequest=null
+  // o ioredis guarda o comando esperando reconexao e nunca rejeita sozinho.
+  const nuncaResolve = new Promise(() => {});
+  const t0Prazo = Date.now();
+  let estourou = null;
+  try { await queue.comPrazo(nuncaResolve, 300, 'teste'); } catch (e) { estourou = e.message; }
+  const gasto = Date.now() - t0Prazo;
+  ok(estourou && estourou.includes('nao respondeu'), `promessa pendurada vira erro claro: "${estourou}"`);
+  ok(gasto >= 280 && gasto < 1500, `o prazo e respeitado (${gasto}ms para um limite de 300ms)`);
+  ok(await queue.comPrazo(Promise.resolve('ok'), 500, 'teste') === 'ok', 'promessa rapida passa sem ser afetada');
+
+  // o driver de memoria sempre reporta online (nao depende de Redis)
+  const contadores = await queue.counts();
+  ok(contadores.offline !== true, 'driver de memoria nunca reporta fila offline');
+
+  // health responde mesmo com a fila degradada
+  const saude = await req('GET', '/api/health');
+  ok(saude.status === 200 && typeof saude.body.filaOffline === 'boolean',
+    `GET /api/health expoe o estado da fila (filaOffline=${saude.body.filaOffline})`);
+
   // --------------------------------------------------------------- fim
   server.close();
   await queue.close();

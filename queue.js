@@ -37,6 +37,25 @@ let bull = null;            // { queue, worker, connection, QueueEvents }
 let memory = null;          // instancia da MemoryQueue
 let iniciado = false;
 
+/**
+ * Corre uma promessa contra o relogio.
+ *
+ * Com `maxRetriesPerRequest: null` (exigido pelo Worker do BullMQ), o ioredis
+ * NAO rejeita quando o Redis cai: ele guarda o comando para quando voltar. Sem
+ * um timeout por cima, um `getJobCounts` durante uma queda deixa a requisicao
+ * HTTP pendurada e o dashboard inteiro congela.
+ */
+function comPrazo(promessa, ms, oQue) {
+  let timer;
+  return Promise.race([
+    promessa,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${oQue}: Redis nao respondeu em ${ms}ms`)), ms);
+      if (timer.unref) timer.unref();
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 // ===========================================================================
 // Processor comum aos dois drivers
 // ===========================================================================
@@ -297,6 +316,27 @@ async function init() {
     store.updateVideo(v.id, { status: 'failed', etapa: 'interrompido', erro: 'servidor reiniciado durante o processamento' });
   }
 
+  // Mesma honestidade para a fila: se o Redis foi reiniciado sem persistencia,
+  // os jobs sumiram mas os registros continuam dizendo "na fila" — e ninguem
+  // nunca mais vai processa-los. Confere job a job e marca os orfaos.
+  if (driver === 'bullmq') {
+    let orfaos = 0;
+    for (const v of store.listVideos({ status: 'queued' })) {
+      if (!v.jobId) continue;
+      try {
+        const job = await comPrazo(bull.queue.getJob(v.jobId), config.REDIS_CMD_TIMEOUT_MS, 'conferir job');
+        if (!job) {
+          store.updateVideo(v.id, { status: 'failed', etapa: 'job perdido', erro: 'a fila foi reiniciada e este trabalho se perdeu' });
+          orfaos++;
+        }
+      } catch (err) {
+        console.warn(`[queue] nao consegui conferir o job ${v.jobId}: ${err.message}`);
+        break; // Redis fora do ar: nao adianta conferir os outros agora
+      }
+    }
+    if (orfaos) console.warn(`⚠️ ${orfaos} video(s) marcados como perdidos: estavam na fila, mas o job nao existe mais`);
+  }
+
   iniciado = true;
   return driver;
 }
@@ -311,16 +351,27 @@ async function addVideo({ nicho, lote = null, origem = 'manual' } = {}) {
 
   let jobId;
   if (driver === 'bullmq') {
-    const job = await bull.queue.add(
-      'gerar-video',
-      { videoId, nicho: nichoOk, lote, origem },
-      {
-        attempts: config.MAX_ATTEMPTS, // MELHORIA 2
-        backoff: { type: 'exponential', delay: config.BACKOFF_MS },
-        removeOnComplete: 100,
-        removeOnFail: 100,
-      }
-    );
+    let job;
+    try {
+      job = await comPrazo(
+        bull.queue.add(
+          'gerar-video',
+          { videoId, nicho: nichoOk, lote, origem },
+          {
+            attempts: config.MAX_ATTEMPTS, // MELHORIA 2
+            backoff: { type: 'exponential', delay: config.BACKOFF_MS },
+            removeOnComplete: 100,
+            removeOnFail: 100,
+          }
+        ),
+        config.REDIS_CMD_TIMEOUT_MS,
+        'enfileirar video'
+      );
+    } catch (err) {
+      // Nao deixa um registro fantasma "na fila" que nunca vai rodar.
+      store.updateVideo(videoId, { status: 'failed', etapa: 'nao enfileirado', erro: err.message });
+      throw new Error(`fila indisponivel: ${err.message}`);
+    }
     jobId = String(job.id);
   } else {
     jobId = memory.add({ videoId, nicho: nichoOk, lote, origem }).id;
@@ -347,17 +398,23 @@ async function addMany(quantidade, nicho) {
 async function counts() {
   if (driver === 'bullmq') {
     try {
-      const c = await bull.queue.getJobCounts('waiting', 'active', 'delayed', 'completed', 'failed');
+      const c = await comPrazo(
+        bull.queue.getJobCounts('waiting', 'active', 'delayed', 'completed', 'failed'),
+        config.REDIS_CMD_TIMEOUT_MS,
+        'contadores da fila'
+      );
       return {
         waiting: c.waiting || 0,
         active: c.active || 0,
         delayed: c.delayed || 0,
         completed: c.completed || 0,
         failed: c.failed || 0,
+        offline: false,
       };
     } catch (err) {
-      console.error('[queue] nao consegui ler contadores do Redis:', err.message);
-      return { waiting: 0, active: 0, delayed: 0, completed: 0, failed: 0, erro: err.message };
+      // Redis fora do ar nao pode derrubar o dashboard: devolve o que da e
+      // marca como offline, para a tela avisar em vez de travar.
+      return { waiting: 0, active: 0, delayed: 0, completed: 0, failed: 0, offline: true, erro: err.message };
     }
   }
   if (memory) return memory.counts();
@@ -402,7 +459,7 @@ async function snapshot() {
 async function clear() {
   if (driver === 'bullmq') {
     try {
-      await bull.queue.obliterate({ force: true });
+      await comPrazo(bull.queue.obliterate({ force: true }), config.REDIS_CMD_TIMEOUT_MS, 'limpar fila');
     } catch (err) {
       console.error('[queue] obliterate falhou:', err.message);
     }
@@ -430,4 +487,5 @@ module.exports = {
   // exportado para os testes
   MemoryQueue,
   runJob,
+  comPrazo,
 };

@@ -362,7 +362,9 @@ function render() {
       : '<div class="empty">Fila vazia — clique em "Gerar 1 Video" ou "Gerar 10 Videos".</div>';
 
     const c = d.fila.contadores;
-    $('filaInfo').textContent = `aguardando ${c.waiting} · ativos ${c.active} · retry ${c.delayed} · concluidos ${c.completed} · falhas ${c.failed}`;
+    $('filaInfo').innerHTML = c.offline
+      ? `<span style="color:var(--red)">⚠️ fila offline — o Redis nao esta respondendo. Os videos ja gerados continuam aqui; novos nao entram ate o Redis voltar.</span>`
+      : `aguardando ${c.waiting} · ativos ${c.active} · retry ${c.delayed} · concluidos ${c.completed} · falhas ${c.failed}`;
 
     // videos
     $('videos').innerHTML = d.videos.length

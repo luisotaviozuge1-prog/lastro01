@@ -37,6 +37,10 @@ const config = {
   BACKOFF_MS: num(process.env.BACKOFF_MS, 1000),
   // Timeout de seguranca por video (evita job preso para sempre)
   JOB_TIMEOUT_MS: num(process.env.JOB_TIMEOUT_MS, 180000),
+  // Timeout das conversas com o Redis. Sem isso, com o Redis fora do ar os
+  // comandos do BullMQ ficam enfileirados esperando reconexao PARA SEMPRE e
+  // a API inteira congela junto.
+  REDIS_CMD_TIMEOUT_MS: num(process.env.REDIS_CMD_TIMEOUT_MS, 2000),
 
   // ------------------------------------------------------------------ caminhos
   PATHS: {

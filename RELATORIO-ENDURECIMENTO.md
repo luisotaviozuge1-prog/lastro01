@@ -7,9 +7,13 @@ Regra da campanha: **só corrigir bug real reproduzido**. Nada de refatorar cód
 |---|---|
 | Início | 09:18 BRT (12:18 UTC) |
 | Suíte no início | 72/72 |
-| Suíte agora | 79/79 |
-| Bugs reais encontrados | 1 |
-| Bugs corrigidos | 1 |
+| Suíte agora | 84/84 |
+| Bugs reais encontrados | 2 |
+| Bugs corrigidos | 2 |
+
+> **Combinado com o dono:** quando o loop terminar (meio-dia), a próxima fase não é mais
+> endurecimento — é conteúdo: plugar narração (TTS) e roteiro/pesquisa por LLM. O endurecimento
+> melhora o chassi; a nota do produto quem move é o conteúdo.
 
 ---
 
@@ -58,6 +62,43 @@ Agora só avisa quando havia arquivo e ele estava ilegível; banco inexistente c
 residual, `.tmp` órfão de uma morte anterior não contamina a próxima escrita, recuperação a
 partir do backup em subprocesso real, e primeira execução silenciosa.
 
+### 🐛 #2 — Redis cair congelava a API inteira
+
+**Gravidade:** alta (sistema inteiro inacessível por uma dependência opcional)
+
+Com o Redis fora do ar, o servidor não caía — mas `/api/health` e `/api/dashboard` **paravam de
+responder**. Nem os vídeos já prontos apareciam.
+
+A causa é uma combinação não óbvia: o Worker do BullMQ exige `maxRetriesPerRequest: null`, e com
+essa opção o ioredis **não rejeita** quando o Redis some — ele guarda o comando esperando a
+reconexão. Então o `getJobCounts` do dashboard ficava pendurado para sempre, a promessa nunca
+rejeitava e o `catch` que existia ali nunca rodava. Um `try/catch` não protege contra algo que
+nunca termina.
+
+**Como foi reproduzido:** 10 vídeos em processamento, `redis-cli shutdown` no meio, e `curl -m 5`
+nas rotas: resposta vazia nas duas, log cuspindo `ECONNREFUSED` sem parar.
+
+**Correção:**
+- `queue.comPrazo()` — todo comando que fala com o Redis corre contra o relógio
+  (`REDIS_CMD_TIMEOUT_MS`, 2s). O que não responde vira erro em vez de pendurar.
+- `counts()` devolve `offline: true` em vez de travar; o dashboard mostra o aviso em vermelho e
+  **continua listando os vídeos já gerados** (que vivem no store, não no Redis).
+- `addVideo()` falha rápido e claro (`fila indisponivel: ...`) e marca o registro como falha, em
+  vez de deixar um fantasma "na fila" que nunca rodaria.
+- `/api/health` responde `status: degradado` com `filaOffline: true`.
+
+**Ponta solta que o próprio teste expôs:** se o Redis volta **vazio** (reinício sem persistência),
+os jobs sumiram mas os registros continuavam dizendo "na fila" — presos para sempre. O
+`queue.init()` agora confere job a job e marca os órfãos como perdidos, do mesmo jeito que já
+fazia com os `processing` interrompidos.
+
+**Verificação:** `/api/health` responde em 2,0s dizendo degradado · dashboard segue listando os 6
+vídeos prontos · POST falha em 2,0s com mensagem clara · Redis volta e o sistema se recupera
+sozinho · reinício com Redis vazio marca os 6 órfãos e deixa 0 presos.
+
+**Testes novos (5):** prazo estoura com erro claro, prazo é respeitado, promessa rápida não é
+afetada, driver de memória nunca reporta offline, `/api/health` expõe o estado da fila.
+
 ---
 
 ## Ângulos atacados
@@ -73,8 +114,17 @@ partir do backup em subprocesso real, e primeira execução silenciosa.
 | 7 | Morte do processo (banco grande) | 20× `kill -9` durante gravação, 1700 vídeos | 🐛 **bug #1** → corrigido → 0 perdas |
 | 8 | Banco corrompido | truncar o principal, deixar o backup bom | ✅ recupera do backup |
 | 9 | Banco destruído | corromper principal **e** backup | ✅ avisa e começa novo, sem derrubar o servidor |
+| 10 | Redis morre em pleno trabalho | `shutdown` com 10 vídeos na fila (driver BullMQ) | 🐛 **bug #2** → corrigido |
+| 11 | Redis volta | subir o Redis de novo com o servidor rodando | ✅ volta a `up` sozinho e aceita vídeo novo |
+| 12 | Redis volta **vazio** | reinício sem persistência + servidor reiniciado | 🐛 órfãos presos → corrigido na mesma leva |
 
 ## Limites conhecidos (não são bugs — são escolhas de projeto)
+
+- **Com o Redis fora do ar, cada requisição ao dashboard gasta os 2s do prazo** antes de responder
+  em modo degradado. É lento de propósito: melhor uma tela honesta e lenta do que uma tela travada.
+  Ajustável em `REDIS_CMD_TIMEOUT_MS`.
+- **Órfãos da fila só são reconciliados no boot.** Se o Redis for reiniciado vazio com o servidor
+  de pé, os registros só são marcados como perdidos no próximo `npm start`.
 
 - **O store é um JSON único reescrito inteiro a cada flush.** Com 130 vídeos o arquivo tem 388KB
   e a gravação é imperceptível. Em torno de 10 mil vídeos (≈3 semanas de piloto automático

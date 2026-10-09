@@ -227,12 +227,14 @@ app.get('/api/nichos', (_req, res) => {
 
 /** GET /api/health */
 app.get('/api/health', async (_req, res) => {
+  const contadores = await queue.counts(); // ja tem prazo: nao pendura
   res.json({
     ok: true,
-    status: 'up',
+    status: contadores.offline ? 'degradado' : 'up',
+    filaOffline: Boolean(contadores.offline),
     driverFila: queue.driver,
     uptimeSegundos: Math.round(process.uptime()),
-    contadores: await queue.counts(),
+    contadores,
     autopilot: autopilot.snapshot(),
   });
 });
