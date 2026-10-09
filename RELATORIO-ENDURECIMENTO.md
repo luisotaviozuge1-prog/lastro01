@@ -7,9 +7,15 @@ Regra da campanha: **só corrigir bug real reproduzido**. Nada de refatorar cód
 |---|---|
 | Início | 09:18 BRT (12:18 UTC) |
 | Suíte no início | 72/72 |
-| Suíte agora | 84/84 |
-| Bugs reais encontrados | 2 |
-| Bugs corrigidos | 2 |
+| Suíte agora | 88/88 |
+| Bugs reais encontrados | 3 |
+| Bugs corrigidos | 3 |
+
+> **Nota sobre o cronograma:** a campanha foi pedida para rodar em ciclos até o meio-dia, mas a
+> sessão ficou dormente entre 09:47 e 19:06 (o contêiner da nuvem é descartado por inatividade e
+> os despertadores agendados não acordam um contêiner recuperado). Resultado: rodaram 3 ciclos —
+> dois de manhã e um à noite — e não as ~10 horas previstas. O que está escrito aqui foi
+> executado de verdade; o resto da lista de ângulos continua em aberto.
 
 > **Combinado com o dono:** quando o loop terminar (meio-dia), a próxima fase não é mais
 > endurecimento — é conteúdo: plugar narração (TTS) e roteiro/pesquisa por LLM. O endurecimento
@@ -99,6 +105,29 @@ sozinho · reinício com Redis vazio marca os 6 órfãos e deixa 0 presos.
 **Testes novos (5):** prazo estoura com erro claro, prazo é respeitado, promessa rápida não é
 afetada, driver de memória nunca reporta offline, `/api/health` expõe o estado da fila.
 
+### 🐛 #3 — Reinício deixava vídeos presos em "na fila" (na configuração padrão)
+
+**Gravidade:** média-alta (atinge quem roda sem Redis, que é o padrão)
+
+A fila em memória não sobrevive a um reinício — mas os registros no banco continuavam dizendo
+"na fila". Como a fila nova começa vazia, ninguém nunca mais ia processá-los: ficavam presos para
+sempre, e o dashboard mentia dizendo que havia trabalho em andamento.
+
+A reconciliação do boot só cobria dois casos: `processing` interrompido (desde sempre) e job órfão
+no BullMQ (corrigido no bug #2). O caso do driver de memória — justamente o padrão — ficou de fora.
+
+**Como foi reproduzido:** 8 vídeos enfileirados, `kill -9` no servidor, reinício →
+`4 na fila` parados, nada acontecendo.
+
+**Correção** (`queue.init`): no driver de memória, todo registro que ainda diga "na fila" no boot é
+órfão por definição. Vira falha, com o motivo explícito e um aviso sugerindo Redis para quem
+precisa que a fila sobreviva a reinícios.
+
+**Verificação:** mesmo cenário depois da correção → `0 na fila · 6 falhas`, nenhum preso.
+
+**Testes novos (4):** "na fila" sem job vira falha, a falha explica o motivo, "processando"
+interrompido vira falha, e nada fica preso em "na fila" após o reinício.
+
 ---
 
 ## Ângulos atacados
@@ -117,12 +146,20 @@ afetada, driver de memória nunca reporta offline, `/api/health` expõe o estado
 | 10 | Redis morre em pleno trabalho | `shutdown` com 10 vídeos na fila (driver BullMQ) | 🐛 **bug #2** → corrigido |
 | 11 | Redis volta | subir o Redis de novo com o servidor rodando | ✅ volta a `up` sozinho e aceita vídeo novo |
 | 12 | Redis volta **vazio** | reinício sem persistência + servidor reiniciado | 🐛 órfãos presos → corrigido na mesma leva |
+| 13 | Render real sob carga | 6 vídeos com ffmpeg, concorrência 2 | ✅ 6/6 válidos (h264 1080x1920), 48s, 15,4s por vídeo, temp limpo |
+| 14 | ffmpeg órfão | `kill -9` no servidor com 2 ffmpeg rodando | ✅ os 2 terminam sozinhos em ~11s, nenhum processo preso |
+| 15 | Reinício com fila em memória | 8 vídeos, `kill -9`, reinício | 🐛 **bug #3** → corrigido |
 
 ## Limites conhecidos (não são bugs — são escolhas de projeto)
 
 - **Com o Redis fora do ar, cada requisição ao dashboard gasta os 2s do prazo** antes de responder
   em modo degradado. É lento de propósito: melhor uma tela honesta e lenta do que uma tela travada.
   Ajustável em `REDIS_CMD_TIMEOUT_MS`.
+- **Lixo em `data/temp` depois de uma queda só some no reinício seguinte**, porque a limpeza de
+  órfãos ignora pastas mexidas há menos de 5 minutos (proteção contra duas instâncias). São alguns
+  MB por vídeo interrompido, recolhidos no próximo `npm start` feito mais de 5 min depois.
+- **Um `kill -9` no servidor deixa o ffmpeg em andamento terminar sozinho** (~11s nos testes). Não
+  há processo preso, mas o render daquele vídeo é desperdiçado.
 - **Órfãos da fila só são reconciliados no boot.** Se o Redis for reiniciado vazio com o servidor
   de pé, os registros só são marcados como perdidos no próximo `npm start`.
 

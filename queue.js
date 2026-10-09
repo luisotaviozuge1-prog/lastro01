@@ -316,9 +316,26 @@ async function init() {
     store.updateVideo(v.id, { status: 'failed', etapa: 'interrompido', erro: 'servidor reiniciado durante o processamento' });
   }
 
-  // Mesma honestidade para a fila: se o Redis foi reiniciado sem persistencia,
-  // os jobs sumiram mas os registros continuam dizendo "na fila" — e ninguem
-  // nunca mais vai processa-los. Confere job a job e marca os orfaos.
+  // Mesma honestidade para a fila. A fila em memoria NAO sobrevive a um
+  // reinicio: qualquer registro que ainda diga "na fila" e orfao por
+  // definicao, porque a fila nova comeca vazia.
+  if (driver === 'memory') {
+    const orfaos = store.listVideos({ status: 'queued' });
+    for (const v of orfaos) {
+      store.updateVideo(v.id, {
+        status: 'failed',
+        etapa: 'job perdido',
+        erro: 'a fila em memoria nao sobrevive a um reinicio do servidor',
+      });
+    }
+    if (orfaos.length) {
+      console.warn(`⚠️ ${orfaos.length} video(s) marcados como perdidos: estavam na fila quando o servidor parou`);
+      console.warn('   (a fila em memoria nao persiste — use Redis se precisar que a fila sobreviva a reinicios)');
+    }
+  }
+
+  // No BullMQ a fila persiste, entao os jobs normalmente continuam la. Mas se
+  // o Redis voltou vazio, os registros ficariam presos: confere job a job.
   if (driver === 'bullmq') {
     let orfaos = 0;
     for (const v of store.listVideos({ status: 'queued' })) {

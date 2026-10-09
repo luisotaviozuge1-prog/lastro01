@@ -475,6 +475,29 @@ async function main() {
   ok(saude.status === 200 && typeof saude.body.filaOffline === 'boolean',
     `GET /api/health expoe o estado da fila (filaOffline=${saude.body.filaOffline})`);
 
+  // ------------- 13) ORFAOS DA FILA (nada pode ficar preso em "na fila")
+  console.log('\n13) ORFAOS — reinicio nao pode deixar video preso na fila');
+  const orfao1 = orchestrator.novoVideoId();
+  const orfao2 = orchestrator.novoVideoId();
+  store.createVideo({ id: orfao1, nicho: 'gta6', jobId: 'm999' });
+  store.createVideo({ id: orfao2, nicho: 'gta6', jobId: 'm998' });
+  store.updateVideo(orfao1, { status: 'queued' });
+  store.updateVideo(orfao2, { status: 'processing', progresso: 40 });
+
+  // init() reconcilia: na fila em memoria, tudo que sobrou e orfao.
+  await queue.close();
+  await queue.init();
+
+  ok(store.getVideo(orfao1).status === 'failed',
+    `"na fila" sem job vira falha (${store.getVideo(orfao1).status})`);
+  ok(/nao sobrevive|perdido/.test(store.getVideo(orfao1).erro || ''),
+    `a falha explica o motivo: "${store.getVideo(orfao1).erro}"`);
+  ok(store.getVideo(orfao2).status === 'failed',
+    `"processando" interrompido vira falha (${store.getVideo(orfao2).status})`);
+  ok(store.listVideos({ status: 'queued' }).length === 0, 'nenhum video fica preso em "na fila" apos o reinicio');
+
+  store.removeVideo(orfao1); store.removeVideo(orfao2);
+
   // --------------------------------------------------------------- fim
   server.close();
   await queue.close();
